@@ -1,0 +1,38 @@
+{
+  "name": "coinjar-total-recall",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "dev:api": "tsx --env-file-if-exists=.env server/index.ts",
+    "demo": "node scripts/demo.mjs",
+    "legacy": "node scripts/legacy.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx --env-file-if-exists=.env server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts tests/*.test.js",
+    "test:browser": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource/dm-sans": "5.3.0",
+    "@fontsource/fraunces": "5.3.0",
+    "@grpc/grpc-js": "1.14.7",
+    "@mysten-incubation/memwal": "0.1.12",
+    "@mysten/dapp-kit-react": "2.1.43",
+    "@mysten/sui": "2.38.0",
+    "@protobuf-ts/grpc-transport": "2.11.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  }
+}
