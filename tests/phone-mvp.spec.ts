@@ -481,6 +481,20 @@ test('today and tomorrow stay distinct and learning appears once', async ({ page
   await expect(page.getByText('Still learning: more recorded expenses are needed.')).toHaveCount(0);
 });
 
+test('saved today message stays on one line within the card on phones', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
+  await page.addInitScript(() => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 1000000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: [{ id: 'c', kind: 'contribution', amountCents: 120000, date: '2026-01-09', note: '', createdAt: '' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 5000000, targetDate: '2026-12-31', status: 'active', createdAt: '' } })));
+  await page.goto('/');
+  for (const width of [320, 375, 430]) {
+    await page.setViewportSize({ width, height: 915 });
+    const saved = page.locator('.phone-saved-today');
+    await expect(saved).toHaveText('You saved ₱1,200.00 today!');
+    const dimensions = await saved.evaluate(element => ({ width: element.clientWidth, textWidth: element.scrollWidth, height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight) }));
+    expect(dimensions.textWidth).toBeLessThanOrEqual(dimensions.width);
+    expect(dimensions.height).toBeLessThanOrEqual(dimensions.lineHeight + 1);
+  }
+});
+
 test('savings settings opens in view on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto('/');
