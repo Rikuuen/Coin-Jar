@@ -13,3 +13,9 @@ playwright-report/
 *.key
 *.p12
 *.pfx
+.vercel
+
+*-release/
+recovery-cloud-test/
+experiments/*
+!experiments/walrus-testnet-client.mjs

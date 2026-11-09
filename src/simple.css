@@ -4,6 +4,7 @@
 .simple-brand span { color: #3d755d; }
 .simple-more, .simple-link { color: #3d755d; font-size: 13px; font-weight: 700; text-decoration: none; }
 .simple-link { border: 0; background: transparent; padding: 10px 0; cursor: pointer; }
+.hosted-savings .simple-section > .simple-link { margin-right: 16px; }
 .simple-more:hover, .simple-link:hover { text-decoration: underline; }
 .simple-main { max-width: 760px; margin: auto; padding: 0 24px 70px; }
 .simple-balance { padding: 52px 0 38px; }
@@ -25,6 +26,8 @@
 .simple-sync { color: #52695b; font-size: 12px; }
 .simple-check { display: flex; gap: 10px; align-items: center; }
 .simple-check input { width: 20px; height: 20px; min-height: 0; margin: 0; }
+.simple-memory-settings { border: 1px solid #d9ded5; padding: 16px; min-width: 0; }
+.simple-memory-settings legend { padding: 0 6px; font-weight: 700; }
 .simple-actions { display: flex; gap: 10px; }
 .simple-button { min-height: 48px; padding: 12px 20px; border: 1px solid #3d755d; font-weight: 700; font-size: 14px; }
 .simple-actions .simple-button { flex: 1; }
@@ -33,13 +36,27 @@
 .simple-button:hover { filter: brightness(.94); }
 .simple-section { padding: 26px 0; border-top: 1px solid #d9ded5; }
 .simple-section h2, .simple-form h2 { font-size: 17px; }
+.profile-settings > .simple-button { width: 100%; max-width: 280px; }
+.profile-settings .simple-form { margin-top: 20px; }
 .simple-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 17px 0; border-bottom: 1px solid #e2e5de; font-size: 14px; }
 .simple-row > div { min-width: 0; }
 .simple-row strong { overflow-wrap: anywhere; }
 .simple-row small { display: block; margin-top: 5px; color: #52695b; font-size: 12px; }
 .simple-empty, .simple-hint { color: #52695b; font-size: 14px; line-height: 1.5; margin: 18px 0 0; }
+.simple-file-label { display: block; margin-top: 20px; font-weight: 700; font-size: 14px; }
+.simple-file-label input { display: block; max-width: 100%; margin-top: 10px; font-size: 14px; }
+.simple-section > .simple-button { margin-top: 18px; }
 .simple-form { padding: 22px; margin: 0 0 30px; background: #e8eee2; }
 .simple-form form { display: grid; gap: 15px; margin-top: 20px; }
+.simple-balance > form.simple-form { display: grid; gap: 16px; margin-top: 24px; }
+.phone-nav { display: flex; gap: 4px; border-bottom: 1px solid #c8dacc; }
+.phone-nav button { flex: 1; min-height: 48px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #52695b; font: inherit; font-weight: 600; cursor: pointer; }
+.phone-nav button[aria-current="page"] { color: #294737; border-bottom-color: #3d755d; }
+.goal-actions { margin-top: 20px; }
+.simple-memory-settings { display: grid; gap: 14px; }
+.simple-memory-settings .simple-hint { margin: 0; }
+.simple-memory-settings input:not([type="checkbox"]) { display: block; width: 100%; margin-top: 6px; }
+#phone-savings-settings { scroll-margin-top: 24px; }
 .simple-form label { color: #2f312d; font-size: 13px; }
 .simple-form input { font-size: 16px; border-color: #b7c7b9; }
 .simple-form .simple-button { justify-self: start; min-width: 110px; }

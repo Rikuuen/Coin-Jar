@@ -12,8 +12,8 @@ export async function createMemoryAdapter({
     client = MemWal.create({ key, accountId, serverUrl, namespace });
   }
   return {
-    remember: (text) => client.rememberAndWait(text, namespace),
-    search: (query, limit = 10) => client.recall({ query, namespace, limit }),
+    remember: (text, options) => options ? client.rememberAndWait(text, namespace, options) : client.rememberAndWait(text, namespace),
+    search: (query, limit = 10, options = {}) => client.recall({ query, namespace, limit, ...options }),
     list: (options = {}) => client.listMemories({ ...options, namespace }),
   };
 }

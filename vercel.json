@@ -1,0 +1,12 @@
+{
+  "services": {
+    "coinjar": {
+      "root": ".",
+      "framework": "node",
+      "entrypoint": "phone-server.mjs",
+      "buildCommand": "node scripts/build-phone.mjs",
+      "functions": { "phone-server.mjs": { "includeFiles": "dist/**" } }
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": { "service": "coinjar" } }]
+}

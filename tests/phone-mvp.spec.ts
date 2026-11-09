@@ -1,0 +1,626 @@
+import { test, expect } from '@playwright/test';
+import { createHash } from 'node:crypto';
+
+test('encrypted journal recovery restores activity in a separate browser without sending the key', async ({ browser }) => {
+  const first = await browser.newContext(), second = await browser.newContext();
+  let record: { token: string; envelope: unknown } | undefined;
+  const handle = async (route: import('@playwright/test').Route) => {
+    const body = route.request().postDataJSON(), token = route.request().headers().authorization;
+    if (body.action === 'backupSave') { record = { token, envelope: body.envelope }; await route.fulfill({ json: { saved: true } }); }
+    else if (body.action === 'backupRestore' && record?.token === token) await route.fulfill({ json: { envelope: record.envelope } });
+    else await route.fulfill({ status: 404, json: { error: 'not found' } });
+  };
+  await first.route('**/api/phone/walrus', handle); await second.route('**/api/phone/walrus', handle);
+  const page = await first.newPage(); await page.goto('/?walrus=mainnet-demo');
+  await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Fictional lunch'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click();
+  const key = await page.getByLabel('Recovery key', { exact: true }).inputValue();
+  await page.getByLabel('I saved my recovery key').check(); await page.getByRole('button', { name: 'Back up journal' }).click();
+  await expect(page.getByText('Encrypted journal backup saved.', { exact: false })).toBeVisible();
+  expect(record?.token).not.toContain(key); expect(JSON.stringify(record?.envelope)).not.toContain('Fictional lunch');
+  const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo');
+  await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();
+  await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill('A'.repeat(43));
+  await other.getByRole('button', { name: 'Restore journal' }).click();
+  await expect(other.getByText('Could not restore the backup.', { exact: false })).toBeVisible();
+  await other.getByRole('button', { name: 'Home' }).click(); await expect(other.locator('.simple-amount')).toHaveText('₱10.00');
+  await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill(key);
+  other.once('dialog', dialog => void dialog.accept()); await other.getByRole('button', { name: 'Restore journal' }).click();
+  await expect(other.getByText('Journal restored on this device.')).toBeVisible(); await other.getByRole('button', { name: 'Home' }).click();
+  await expect(other.locator('.simple-amount')).toHaveText('₱950.00'); await other.getByRole('button', { name: 'Activity' }).click(); await expect(other.getByText('Fictional lunch')).toBeVisible();
+  await first.close(); await second.close();
+});
+
+test('generated memory code recovers preferences without overwriting them on a second device', async ({ page, browser }) => {
+  const records = new Map<string, string>(); let writes = 0;
+  const handle = async (route: import('@playwright/test').Route) => {
+    const code = route.request().headers().authorization;
+    const body = route.request().postDataJSON();
+    expect(route.request().headers()['x-coinjar-memory-user']).toBe('1');
+    if (body.action === 'remember') { writes++; records.set(code, body.memory); await route.fulfill({ json: { saved: true, memoryId: 'id', blobId: 'blob' } }); }
+    else await route.fulfill({ json: { memories: records.has(code) ? [records.get(code)] : [] } });
+  };
+  await page.route('**/api/phone/walrus', handle);
+  await page.goto('/');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('1000');
+  await page.getByLabel('Automatically save preferences').check();
+  const code = await page.getByLabel('Memory access code').inputValue();
+  expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  await page.getByLabel('I saved my memory code').check();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect.poll(() => writes).toBe(1);
+  const second = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  try {
+    await second.route('**/api/phone/walrus', handle);
+    const other = await second.newPage(); await other.goto('/');
+    await other.getByLabel('Nickname').fill('Ari');
+    await other.getByLabel('Currency').selectOption('PHP');
+    await other.getByLabel('Current balance').fill('500');
+    await other.getByLabel('Automatically save preferences').check();
+    await other.getByRole('button', { name: 'Use an existing code' }).click();
+    await other.getByLabel('Memory access code').fill(code);
+    await other.getByLabel('I saved my memory code').check();
+    await other.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(other.getByText('Review your saved preferences in Profile before syncing.')).toBeVisible();
+    expect(writes).toBe(1);
+    await other.getByRole('button', { name: 'Profile' }).click();
+    other.once('dialog', dialog => void dialog.accept());
+    await other.getByRole('button', { name: 'Find preferences' }).click();
+    other.once('dialog', dialog => void dialog.accept());
+    await other.getByRole('button', { name: 'Review memory 1' }).click();
+    await expect(other.getByText('Saved preferences applied on this device.')).toBeVisible();
+    await expect.poll(() => writes).toBe(2);
+  } finally { await second.close(); }
+});
+
+test('demo tools are hidden and the normal journal remains untouched', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('coinjar.phone.journal.v1', 'original journal untouched'));
+  await page.goto('/?walrus=mainnet-demo');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('1000');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByText('Mainnet demo memories')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save and verify demo memories' })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.journal.v1'))).toBe('original journal untouched');
+});
+
+test('mainnet demo applies a recalled fictional spending pattern with a mock provider', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-11-09T12:00:00Z'));
+  const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'recent-spending-spike', recentDays: 3, previousDays: 3, observedThrough: '2026-11-09' });
+  const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-11-01', bufferCents: 0, dailyLimitCents: 10000, entries: [], adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-11-19', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j)), journal);
+  await page.route('**/api/phone/walrus', async route => {
+    expect(route.request().headers()['x-coinjar-memory-network']).toBe('mainnet');
+    const body = route.request().postDataJSON();
+    await route.fulfill(body.action === 'recallHabit' ? { json: { memories: [memory] } } : { json: { saved: true, memoryId: 'mock-id', blobId: 'mock-blob' } });
+  });
+  await page.goto('/?walrus=mainnet-demo');
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').check();
+  if (await page.getByLabel('I saved my memory code').count()) await page.getByLabel('I saved my memory code').check();
+  await page.getByLabel('Remember spending patterns').check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Walrus remembers a recent spending increase', { exact: false })).toBeVisible();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+});
+
+test('wallet uses the saved personal memory code automatically', async ({ page }) => {
+  const address = '0x' + '1'.repeat(64); let token = '';
+  await page.route('**/api/phone/walrus', async route => await route.fulfill({ json: { saved: true, memoryId: 'mock', blobId: 'mock' } }));
+  await page.route('**/api/phone/wallet-balance', async route => { token = route.request().headers().authorization; expect(route.request().headers()['x-coinjar-memory-user']).toBe('1'); await route.fulfill({ json: { network: 'mainnet', balanceMist: '1230000000', checkedAt: '2026-11-09T04:00:00Z' } }); });
+  await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000');
+  await page.getByLabel('Automatically save preferences').check(); const code = await page.getByLabel('Memory access code').inputValue(); await page.getByLabel('I saved my memory code').check(); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByLabel('CoinJar access code')).toHaveCount(0);
+  await page.getByLabel('Sui public address').fill(address); await page.getByRole('button', { name: 'Check balance' }).click();
+  await expect(page.getByText('1.23 SUI', { exact: false })).toBeVisible(); expect(token).toBe(`Bearer ${code}`);
+});
+
+test('read-only Sui balance stays separate from the phone journal', async ({ page }) => {
+  const address = '0x' + '1'.repeat(64);
+  let calls = 0;
+  await page.route('**/api/phone/wallet-balance', async route => {
+    calls++;
+    expect(route.request().postDataJSON()).toEqual({ address });
+    await route.fulfill({ json: { network: 'mainnet', balanceMist: '1234567890', checkedAt: '2026-11-09T04:00:00Z' } });
+  });
+  await page.goto('/');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('1000');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByLabel('Sui public address').fill(address);
+  await page.getByLabel('CoinJar access code').fill('a'.repeat(43));
+  await page.getByRole('button', { name: 'Check balance' }).click();
+  await expect(page.getByText('1.23456789 SUI', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.locator('.simple-amount')).toHaveText('₱1,000.00');
+  expect(calls).toBe(1);
+  await page.reload();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByLabel('Sui public address')).toHaveValue(address);
+  await expect(page.getByText('1.23456789 SUI', { exact: false })).toHaveCount(0);
+});
+
+test('phone journal saves its loop locally and restores only a valid confirmed backup', async ({ page, context, browser }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  const requests: string[] = [];
+  page.on('request', request => { if (request.url().includes('/api/')) requests.push(request.url()); });
+  await page.goto('/');
+  await expect(page.getByTestId('backup-controls')).toBeHidden();
+  await expect(page.getByText('Continue with Google')).toHaveCount(0);
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('1000');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Create goal' }).click();
+  await page.getByLabel('Goal name').fill('Emergency');
+  await page.getByLabel('Goal target in PHP').fill('500');
+  await page.getByLabel('Target date', { exact: true }).fill((await page.getByLabel('Target date', { exact: true }).getAttribute('min'))!);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Add income' }).click();
+  await page.getByLabel('Amount in PHP').fill('100');
+  await page.getByLabel('Note (optional)').fill('Pay');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Add expense' }).click();
+  await page.getByLabel('Amount in PHP').fill('50');
+  await page.getByLabel('Note (optional)').fill('Lunch');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.simple-amount')).toHaveText('₱1,050.00');
+  await expect(page.getByText('Daily savings suggestion')).toBeVisible();
+  await page.getByRole('button', { name: 'Add savings' }).click();
+  await page.getByLabel('Amount in PHP').fill('10');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByText('₱10.00 saved of ₱500.00 · 2%')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.simple-amount')).toHaveText('₱1,040.00');
+  await expect(page.getByText('Hi, Ari')).toBeVisible();
+  await expect(page.getByTestId('backup-controls')).toBeHidden();
+  await page.getByTestId('backup-controls').evaluate(element => element.removeAttribute('hidden'));
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download backup' }).click();
+  const download = await downloadPromise;
+  const backup = await download.path();
+  expect(backup).toBeTruthy();
+  await page.getByRole('button', { name: 'Add expense' }).click();
+  await page.getByLabel('Amount in PHP').fill('5');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.simple-amount')).toHaveText('₱1,035.00');
+  await page.getByLabel('Restore backup').setInputFiles({ name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{bad') });
+  await expect(page.getByRole('alert')).toContainText('not changed');
+  await expect(page.locator('.simple-amount')).toHaveText('₱1,035.00');
+  page.once('dialog', dialog => void dialog.dismiss());
+  await page.getByLabel('Restore backup').setInputFiles(backup!);
+  await expect(page.locator('.simple-amount')).toHaveText('₱1,035.00');
+  page.once('dialog', dialog => void dialog.accept());
+  await page.getByLabel('Restore backup').setInputFiles(backup!);
+  await expect(page.locator('.simple-amount')).toHaveText('₱1,040.00');
+  await page.getByRole('button', { name: 'Activity' }).click();
+  await expect(page.getByText('Lunch')).toBeVisible();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await page.reload();
+  await expect(page.getByText('₱10.00 saved of ₱500.00 · 2%')).toBeVisible();
+  expect(requests).toEqual([]);
+  const fresh = await context.newPage();
+  await fresh.goto('/');
+  await expect(fresh.locator('.simple-amount')).toHaveText('₱1,040.00');
+  await fresh.close();
+  const otherDevice = await browser.newContext({ viewport: { width: 412, height: 915 }, baseURL: new URL(page.url()).origin });
+  try {
+    const restoredPage = await otherDevice.newPage();
+    await restoredPage.goto('/');
+    await expect(restoredPage.getByLabel('Currency')).toBeVisible();
+    await expect(restoredPage.getByTestId('backup-controls')).toBeHidden();
+    await restoredPage.getByTestId('backup-controls').evaluate(element => element.removeAttribute('hidden'));
+    await restoredPage.getByLabel('Restore backup').setInputFiles(backup!);
+    await expect(restoredPage.locator('.simple-amount')).toHaveText('₱1,040.00');
+    await expect(restoredPage.getByText('Hi, Ari')).toBeVisible();
+    await expect(restoredPage.getByText('₱10.00 saved of ₱500.00 · 2%')).toBeVisible();
+  } finally { await otherDevice.close(); }
+});
+
+test('a damaged local journal is not silently replaced', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => localStorage.setItem('coinjar.phone.journal.v1', '{broken'));
+  await page.reload();
+  await expect(page.getByRole('alert')).toContainText('Could not read');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('10');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('another tab');
+  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.journal.v1'))).toBe('{broken');
+});
+
+test('goal coach reserves estimated spending only when needed', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-27T12:00:00Z'));
+  const dates = ['2026-01-06', '2026-01-13', '2026-01-20', '2026-01-07', '2026-01-14', '2026-01-21'];
+  const journal = { version: 1, currency: 'PHP', openingCents: 123000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: dates.map((date, i) => ({ id: `e${i}`, kind: 'expense', amountCents: [10000, 20000, 30000, 1000, 1000, 1000][i], date, note: '', createdAt: '' })), adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-02-05', status: 'active', createdAt: '' } };
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal); await page.goto('/');
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱400.00');
+  await expect(section.getByText('Estimated spending still to come: ₱200.00', { exact: false }).first()).toBeVisible();
+  await expect(section.getByText('short of the remaining goal', { exact: false }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Add income' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱500.00');
+});
+
+test('new goals require a target date', async ({ page }) => {
+  await page.goto('/?walrus=mainnet-demo');
+  await page.getByLabel('Nickname').fill('Demo'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Goal'); await page.getByLabel('Goal target in PHP').fill('5000');
+  const date = page.getByLabel('Target date', { exact: true }); await expect(date).toHaveAttribute('required', '');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Create goal' })).toBeVisible();
+  await expect(date).toBeVisible();
+});
+
+test('goal coach recalculates after different daily savings', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-01T12:00:00Z'));
+  await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('10000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Goal'); await page.getByLabel('Goal target in PHP').fill('5000'); await page.getByLabel('Target date', { exact: true }).fill('2026-01-10'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱500.00');
+  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱0.00'); await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱522.23');
+  await page.clock.setFixedTime(new Date('2026-01-02T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('500'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.clock.setFixedTime(new Date('2026-01-03T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('200'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱0.00'); await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱571.43');
+  await page.reload(); await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱571.43');
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Savings settings' }).click();
+  await expect(page.getByLabel('Minimum cash buffer')).toHaveCount(0); await expect(page.getByLabel('Daily savings limit')).toHaveCount(0);
+});
+
+test('today and tomorrow stay distinct and learning appears once', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
+  await page.addInitScript(() => {
+    localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 1500, entries: [{ id: 'c', kind: 'contribution', amountCents: 5000, date: '2026-01-09', note: '', createdAt: '2026-01-09T12:00:00Z' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 100000, targetDate: '2026-01-10', phoneStartDate: '2026-01-01', phoneBaselineCents: 1500, status: 'active', createdAt: '' } }));
+    localStorage.setItem('coinjar.phone.walrus.auto.v1', JSON.stringify({ enabled: true, habits: true, recentHabits: true, code: 'g'.repeat(43) }));
+  });
+  await page.route('**/api/phone/walrus', async route => await route.fulfill({ json: route.request().postDataJSON().action === 'recallHabit' ? { memories: [] } : { saved: true } }));
+  await page.goto('/');
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱0.00');
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱950.00');
+  await expect(page.getByText('Still learning: more recorded expenses are needed.')).toHaveCount(1);
+});
+
+test('savings settings opens in view on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto('/');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('100');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await expect(page.getByRole('heading', { name: 'Savings settings' })).toBeVisible();
+  await expect.poll(() => page.getByRole('heading', { name: 'Savings settings' }).evaluate(el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })).toBe(true);
+});
+
+test('Walrus requires consent and restores only approved preferences with a mock provider', async ({ page }) => {
+  let remembered = '';
+  let releaseWrite!: () => void;
+  const writeReady = new Promise<void>(resolve => { releaseWrite = resolve; });
+  await page.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'remember') { remembered = body.memory; await writeReady; await route.fulfill({ json: { saved: true } }); }
+    else await route.fulfill({ json: { memories: [remembered] } });
+  });
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.goto('/');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('1000');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Add expense' }).click();
+  await page.getByLabel('Amount in PHP').fill('10');
+  await page.getByLabel('Note (optional)').fill('private lunch');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  if (!(await page.getByRole('button', { name: 'Find preferences' }).isVisible())) await page.getByText('Memory tools').click();
+  await page.getByLabel('Access code', { exact: true }).fill('a'.repeat(43));
+  page.once('dialog', dialog => void dialog.dismiss());
+  await page.getByRole('button', { name: 'Save preferences' }).click();
+  expect(remembered).toBe('');
+  page.once('dialog', dialog => void dialog.accept());
+  await page.getByRole('button', { name: 'Save preferences' }).click();
+  await expect(page.getByText('Saving to Walrus testnet. This may take a minute.')).toBeVisible();
+  releaseWrite();
+  await expect(page.getByText('Testnet memory saved.')).toBeVisible();
+  expect(remembered).not.toContain('private lunch');
+  await page.getByRole('button', { name: 'Home' }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await expect(page.getByLabel('Minimum cash buffer')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  if (!(await page.getByRole('button', { name: 'Find preferences' }).isVisible())) await page.getByText('Memory tools').click();
+  await page.getByLabel('Access code', { exact: true }).fill('a'.repeat(43));
+  page.once('dialog', dialog => void dialog.accept());
+  await page.getByRole('button', { name: 'Find preferences' }).click();
+  page.once('dialog', dialog => void dialog.accept());
+  await page.getByRole('button', { name: 'Review memory 1' }).click();
+  await expect(page.getByText('Saved preferences applied on this device.')).toBeVisible();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.locator('.simple-amount')).toHaveText('₱990.00');
+  await page.getByRole('button', { name: 'Activity' }).click();
+  await expect(page.getByText('private lunch')).toBeVisible();
+});
+
+test('automatic Walrus preferences opt in on onboarding and retry the same pending write after reload', async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  const writes: { memory: string; operationId: string }[] = [];
+  await page.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON();
+    writes.push(body);
+    await route.fulfill(writes.length === 1 ? { status: 503, json: { error: 'unavailable' } } : { json: { saved: true } });
+  });
+  await page.goto('/');
+  await expect(page.getByLabel('Automatically save preferences')).not.toBeChecked();
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('1000');
+  await page.getByLabel('Automatically save preferences').check();
+  await expect(page.getByLabel('Memory access code')).toHaveValue(/^[A-Za-z0-9_-]{43}$/);
+  await page.getByLabel('I saved my memory code').check();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByText('Could not confirm Walrus sync.', { exact: false })).toBeVisible();
+  expect(writes).toHaveLength(1);
+  expect(writes[0].memory).not.toContain('100000');
+  await page.reload();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByText('Preferences saved to Walrus mainnet.')).toBeVisible();
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toMatchObject({ operationId: writes[0].operationId, memory: writes[0].memory });
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await expect(page.getByLabel('Automatically save preferences')).toBeChecked();
+  await expect(page.getByLabel('Minimum cash buffer')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  expect(writes).toHaveLength(2);
+  expect(writes[1].memory).not.toContain('bufferCents');
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').uncheck();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await expect(page.getByLabel('Automatically save preferences')).not.toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.walrus.auto.v1'))).toBeNull();
+  expect(writes).toHaveLength(2);
+});
+
+test('automatic Walrus can be enabled later from savings settings', async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  let writes = 0;
+  await page.route('**/api/phone/walrus', async route => { writes++; await route.fulfill({ json: { saved: true } }); });
+  await page.goto('/');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('USD');
+  await page.getByLabel('Current balance').fill('100');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  expect(writes).toBe(0);
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').check();
+  if (await page.getByLabel('I saved my memory code').count()) await page.getByLabel('I saved my memory code').check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByText('Preferences saved to Walrus mainnet.')).toBeVisible();
+  expect(writes).toBe(1);
+});
+
+test('automatic Walrus waits offline and resumes when the browser reconnects', async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  let writes = 0;
+  await page.addInitScript(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false }); });
+  await page.route('**/api/phone/walrus', async route => { writes++; await route.fulfill({ json: { saved: true } }); });
+  await page.goto('/');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('100');
+  await page.getByLabel('Automatically save preferences').check();
+  await expect(page.getByLabel('Memory access code')).toHaveValue(/^[A-Za-z0-9_-]{43}$/);
+  await page.getByLabel('I saved my memory code').check();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByText('Offline. Preferences remain on this device', { exact: false })).toBeVisible();
+  expect(writes).toBe(0);
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true }); window.dispatchEvent(new Event('online')); });
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByText('Preferences saved to Walrus mainnet.')).toBeVisible();
+  expect(writes).toBe(1);
+});
+
+test('turning automatic saving off also stops another open tab', async ({ page, context }) => {
+  let writes = 0;
+  await context.route('**/api/phone/walrus', async route => { writes++; await route.fulfill({ json: { saved: true } }); });
+  await page.goto('/');
+  await page.getByLabel('Nickname').fill('Ari');
+  await page.getByLabel('Currency').selectOption('PHP');
+  await page.getByLabel('Current balance').fill('100');
+  await page.getByLabel('Automatically save preferences').check();
+  await expect(page.getByLabel('Memory access code')).toHaveValue(/^[A-Za-z0-9_-]{43}$/);
+  await page.getByLabel('I saved my memory code').check();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await expect(page.getByText('Preferences saved to Walrus mainnet.')).toBeVisible();
+  const second = await context.newPage();
+  await second.goto('/');
+  await second.getByRole('button', { name: 'Profile' }).click();
+  await expect(second.getByText('Preferences saved to Walrus mainnet.')).toBeVisible();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').uncheck();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await second.getByRole('button', { name: 'Profile' }).click();
+  await expect(second.getByText('Automatic Walrus saving is off.')).toBeVisible();
+  await second.getByRole('button', { name: 'Profile' }).click();
+  await second.getByRole('button', { name: 'Savings settings' }).click();
+  await expect(second.getByLabel('Automatically save preferences')).not.toBeChecked();
+  expect(writes).toBe(1);
+  await second.close();
+});
+
+test('a separately approved recalled habit changes the next-day estimate and can be turned off', async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
+  const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'higher-day-spending', days: [6], sampleDays: [3], recordedDays: 7, observedThrough: '2026-01-08' });
+  const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: [], adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-01-19', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal);
+  let recalls = 0;
+  await page.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'recallHabit') { recalls++; await route.fulfill({ json: { memories: [memory, memory.replace('"recordedDays":7', '"recordedDays":7,"note":"private"')] } }); }
+    else await route.fulfill({ json: { saved: true } });
+  });
+  await page.goto('/');
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  expect(recalls).toBe(0);
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').check();
+  if (await page.getByLabel('I saved my memory code').count()) await page.getByLabel('I saved my memory code').check();
+  await expect(page.getByLabel('Remember spending patterns')).not.toBeChecked();
+  await page.getByLabel('Remember spending patterns').check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Using an approved spending pattern recalled from Walrus mainnet.')).toBeVisible();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Walrus remembers your spending patterns across the week', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Remember spending patterns').uncheck();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Walrus remembers your spending patterns across the week', { exact: false })).toHaveCount(0);
+});
+
+test('automatic habit saving sends aggregate evidence only and recalls it', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
+  const dates = ['2025-12-20', '2025-12-27', '2026-01-03', '2025-12-21', '2025-12-28', '2026-01-04'];
+  const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2025-12-20', bufferCents: 0, dailyLimitCents: 10000, entries: dates.map((date, i) => ({ id: `e${i}`, kind: 'expense', amountCents: i < 3 ? 200 : 50, note: 'private coffee', date, createdAt: '' })), adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-12-31', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal);
+  let habit = '';
+  await page.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'recallHabit') await route.fulfill({ json: { memories: habit ? [habit] : [] } });
+    else { if (body.memory?.startsWith('COINJAR_PHONE_HABIT_V1 ')) habit = body.memory; await route.fulfill({ json: { saved: true } }); }
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').check();
+  if (await page.getByLabel('I saved my memory code').count()) await page.getByLabel('I saved my memory code').check();
+  await page.getByLabel('Remember spending patterns').check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Using an approved spending pattern recalled from Walrus mainnet.')).toBeVisible();
+  expect(habit).toContain('"days":[6]');
+  expect(habit).not.toContain('private coffee');
+  expect(habit).not.toContain('"amountCents"');
+});
+
+test('unavailable Walrus habits leave tomorrow’s estimate based on local data', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
+  const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: [{ id: 'future', kind: 'expense', amountCents: 95000, note: '', date: '2026-01-10', createdAt: '' }], adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-01-19', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
+  await page.addInitScript(j => { localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)); localStorage.setItem('coinjar.phone.walrus.auto.v1', JSON.stringify({ enabled: true, habits: true, code: 'g'.repeat(43) })); }, journal);
+  await page.route('**/api/phone/walrus', async route => { const body = route.request().postDataJSON(); await route.fulfill(body.action === 'recallHabit' ? { status: 503, json: { error: 'unavailable' } } : { json: { saved: true } }); });
+  await page.goto('/');
+  await expect(page.getByText('Walrus habits unavailable.', { exact: false })).toBeVisible();
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Walrus remembers your spending patterns across the week', { exact: false })).toHaveCount(0);
+});
+
+test('recent-spending memories require separate consent and adjust tomorrow without stacking', async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.clock.setFixedTime(new Date('2026-01-12T12:00:00Z'));
+  const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'recent-spending-spike', recentDays: 3, previousDays: 4, observedThrough: '2026-01-11' });
+  const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: [], adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-01-22', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal);
+  let recalls = 0;
+  await page.route('**/api/phone/walrus', async route => { const body = route.request().postDataJSON(); if (body.action === 'recallHabit') { recalls++; await route.fulfill({ json: { memories: [memory] } }); } else await route.fulfill({ json: { saved: true } }); });
+  await page.goto('/');
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  expect(recalls).toBe(0);
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').check();
+  if (await page.getByLabel('I saved my memory code').count()) await page.getByLabel('I saved my memory code').check();
+  await expect(page.getByLabel('Remember spending patterns')).not.toBeChecked();
+  await page.getByLabel('Remember spending patterns').check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Walrus remembers a recent spending increase', { exact: false })).toBeVisible();
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱90.91');
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Remember spending patterns').uncheck();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱90.91');
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Walrus remembers a recent spending increase', { exact: false })).toHaveCount(0);
+});
+
+test('recent-spending detection saves only aggregate evidence', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-15T12:00:00Z'));
+  const dates = ['2026-01-13', '2026-01-14', '2026-01-15', '2026-01-06', '2026-01-07', '2026-01-08'];
+  const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: dates.map((date, i) => ({ id: `e${i}`, kind: 'expense', amountCents: i < 3 ? 2000 : 500, note: 'private lunch', date, createdAt: '' })), adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-12-31', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
+  await page.addInitScript((j) => {
+    localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j));
+    const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'recent-spending-spike', recentDays: 3, previousDays: 3, observedThrough: '2026-01-01' });
+    localStorage.setItem('coinjar.phone.walrus.spike.pending.v1', JSON.stringify({ memory, operationId: '00000000-0000-4000-8000-000000000000' }));
+  }, journal);
+  let spike = '';
+  await page.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'recallHabit') await route.fulfill({ json: { memories: spike ? [spike] : [] } });
+    else { if (body.memory?.includes('recent-spending-spike')) spike = body.memory; await route.fulfill({ json: { saved: true } }); }
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Profile' }).click();
+  await page.getByRole('button', { name: 'Savings settings' }).click();
+  await page.getByLabel('Automatically save preferences').check();
+  const personalPendingKey = 'coinjar.phone.walrus.spike.pending.v1.personal.' + createHash('sha256').update(await page.getByLabel('Walrus access code').inputValue()).digest('hex');
+  await page.evaluate(key => {
+    const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'recent-spending-spike', recentDays: 3, previousDays: 3, observedThrough: '2026-01-01' });
+    localStorage.setItem(key, JSON.stringify({ memory, operationId: '00000000-0000-4000-8000-000000000001' }));
+  }, personalPendingKey);
+  if (await page.getByLabel('I saved my memory code').count()) await page.getByLabel('I saved my memory code').check();
+  await page.getByLabel('Remember spending patterns').check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByText('Walrus remembers a recent spending increase', { exact: false })).toBeVisible();
+  expect(spike).toContain('"recentDays":3');
+  expect(spike).toContain('2026-01-15');
+  expect(await page.evaluate(key => localStorage.getItem(key), personalPendingKey)).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.walrus.spike.pending.v1'))).not.toBeNull();
+  expect(spike).not.toContain('private lunch');
+  expect(spike).not.toContain('"amountCents"');
+});

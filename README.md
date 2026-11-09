@@ -1,30 +1,28 @@
 # CoinJar
 
-CoinJar is a local, single-user savings journal for tracking balances, income, expenses, and savings goals. It can optionally use Walrus Memory for consented summaries and Tatum for exchange rates and Sui balance lookups. A journal entry or movement into the in-app jar is bookkeeping, not a bank transfer.
+CoinJar is a phone-first savings journal. Set a currency and balance, record income and expenses, and choose a savings goal and target date. CoinJar suggests a daily amount and adjusts the pace as the goal progresses.
 
-## Run locally
+The journal stays in the browser. Optional Walrus Memory stores approved preferences and spending patterns, and encrypted journal recovery lets you restore a saved snapshot using your recovery key. A read-only Tatum lookup shows a Sui wallet balance separately from recorded savings. A savings entry is not a bank transfer.
+
+## Run the phone app
 
 Requires Node.js 24 or later.
 
 ```sh
 npm ci
-npm run build
-npm start
+node scripts/build-phone.mjs
+node phone-server.mjs
 ```
 
-Open http://127.0.0.1:4318. For an isolated sample journal, run `npm run demo` and open http://127.0.0.1:4320. The demo uses a separate local database. Copy `.env.example` to `.env` and fill in optional integration settings only if needed. Never commit `.env`, keys, wallet recovery phrases, databases, or certificates.
+Open http://127.0.0.1:4371. Walrus and Tatum require server-side provider configuration. Keep credentials in environment variables and never commit keys, recovery codes, or journal data.
 
 ## Checks
 
 ```sh
 npm run typecheck
 npm test
-npm run build
-npm run test:browser
+node scripts/build-phone.mjs
+npx playwright test --config playwright-phone.config.ts
 ```
 
-The browser tests use Chrome and a separate local test database. Build the application before running them.
-
-## Limits
-
-The app runs locally and is not a hosted multi-user service. It is not a bank connection or an independently verified PayBox marketplace plugin. Wallet-approved Sui USDC transfers require a separate user approval and network fees; a recorded journal contribution alone does not prove a transfer. Optional Walrus summaries are processed by the memory service as plaintext. zkLogin wallet verification sends the signed challenge and wallet address to the configured public Sui verification service.
+Tests use fixtures and do not prove live provider availability. Walrus recovery requires the saved recovery key and a successfully saved backup; it is not an automatic replacement for a database. Clearing browser data can remove the local journal. This project is not a verified PayBox marketplace plugin.

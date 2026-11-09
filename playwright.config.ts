@@ -12,7 +12,7 @@ export default defineConfig({
   webServer: {
     command: 'node --import tsx scripts/test-server.ts',
     url: 'http://127.0.0.1:4319',
-    reuseExistingServer: false,
+    reuseExistingServer: process.env.COINJAR_REUSE_TEST_SERVER === '1',
     env: {
       PORT: '4319',
       COINJAR_DB: `.data/browser-test-${Date.now()}.sqlite`,

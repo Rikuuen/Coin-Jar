@@ -13,6 +13,8 @@ export interface Goal {
   title: string;
   targetCents: number;
   targetDate?: string;
+  phoneStartDate?: string;
+  phoneBaselineCents?: number;
   status: 'active' | 'paused' | 'completed';
   createdAt: string;
   wallet?: { address: string; balance?: unknown; updatedAt?: string };
@@ -145,6 +147,7 @@ export interface AppState {
   feedback?: RecommendationFeedback[];
   insightReviews?: InsightReview[];
   rememberedWeekendSpending?: boolean;
+  rememberedRecentSpendingSpike?: boolean;
   weekendProvenance?: { observations?: string[]; restored?: boolean; remoteId?: string };
   autoMemorySync?: boolean;
   openingCashCents?: number;
@@ -633,11 +636,14 @@ export function recommend(state: AppState, today: string) {
     const observedWeekend = insights.some(
       (i) => i.id === 'higher-weekend-spending' && i.status !== 'dismissed',
     );
-    const spike = insights.some(
+    const observedSpike = insights.some(
       (i) => i.id === 'recent-spending-spike' && i.status !== 'dismissed',
     );
+    const spikeDismissed = state.insightReviews?.some((r) => r.id === 'recent-spending-spike' && r.status === 'dismissed');
+    const spike = observedSpike || (state.rememberedRecentSpendingSpike === true && !spikeDismissed && !insights.some(i => i.id === 'recent-spending-change'));
     const beforePattern = amountCents;
     let pattern: Insight | undefined;
+    let selectedPatternId: 'higher-weekend-spending' | 'recent-spending-spike' | undefined;
     let patternSelected = false;
     let patternSource: RecommendationFactor['source'] = 'detected';
     if (
@@ -646,6 +652,7 @@ export function recommend(state: AppState, today: string) {
       (rememberedWeekend || observedWeekend)
     ) {
       patternSelected = true;
+      selectedPatternId = 'higher-weekend-spending';
       pattern = insights.find((i) => i.id === 'higher-weekend-spending');
       patternSource = rememberedWeekend ? (state.weekendProvenance?.restored ? 'walrus' : 'confirmed') : 'detected';
       amountCents = Number((BigInt(amountCents) * 3n) / 4n);
@@ -656,10 +663,12 @@ export function recommend(state: AppState, today: string) {
       );
     } else if (spike) {
       patternSelected = true;
+      selectedPatternId = 'recent-spending-spike';
       pattern = insights.find((i) => i.id === 'recent-spending-spike');
+      patternSource = observedSpike ? 'detected' : 'walrus';
       amountCents = Number((BigInt(amountCents) * 3n) / 4n);
       reasons.push(
-        'Recorded spending in the last seven days was at least twice the previous seven days, so the suggestion is reduced by 25%; records may be incomplete.',
+        observedSpike ? 'Recorded spending in the last seven days was at least twice the previous seven days, so the suggestion is reduced by 25%; records may be incomplete.' : 'Walrus recalled a recent spending increase, so the suggestion is reduced by 25%; the pattern may change.',
       );
     }
     const patternApplied = amountCents !== beforePattern;
@@ -676,9 +685,9 @@ export function recommend(state: AppState, today: string) {
       { type: 'pace', value: state.preferences.pace, source: state.preferences.paceProvenance?.restored ? 'walrus' : state.preferences.paceProvenance?.origin ?? 'unknown', origin: state.preferences.paceProvenance?.origin ?? 'unknown', affected: calculate(summary.remainingCents, state.preferences.dailyLimitCents, safeCents, Number.MAX_SAFE_INTEGER) > amountCents },
       { type: 'daily_limit', value: state.preferences.dailyLimitCents, source: provenance?.restored ? 'walrus' : provenance?.origin === 'confirmed' ? 'confirmed' : provenance?.origin === 'manual' || provenance?.origin === 'explicit' ? 'manual' : 'unknown', affected: withoutLimitCents > amountCents, origin: provenance?.origin ?? 'unknown', observations: provenance?.observations, remoteId: provenance?.remoteId },
     );
-    if (pattern || rememberedWeekend && [0, 5, 6].includes(weekday) && !weekendDismissed) factors.push({
-      type: pattern?.id ?? 'higher-weekend-spending', value: '25% reduction', source: patternSource,
-      affected: patternApplied, observations: rememberedWeekend ? state.weekendProvenance?.observations : pattern?.observations, origin: rememberedWeekend ? 'confirmed' : undefined, remoteId: rememberedWeekend ? state.weekendProvenance?.remoteId : undefined,
+    if (pattern || (patternSelected && (rememberedWeekend || spike))) factors.push({
+      type: pattern?.id ?? selectedPatternId!, value: '25% reduction', source: patternSource,
+      affected: patternApplied, observations: selectedPatternId === 'higher-weekend-spending' && rememberedWeekend ? state.weekendProvenance?.observations : pattern?.observations, origin: selectedPatternId === 'higher-weekend-spending' && rememberedWeekend ? 'confirmed' : undefined, remoteId: selectedPatternId === 'higher-weekend-spending' && rememberedWeekend ? state.weekendProvenance?.remoteId : undefined,
     });
     if (billCents)
       reasons.push(

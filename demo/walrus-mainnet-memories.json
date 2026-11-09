@@ -1,0 +1,15 @@
+{
+  "description": "Fictional CoinJar hackathon demo data. Do not use as a real person's preferences or in their regular memory namespace.",
+  "memories": [
+    { "kind": "preferences", "currency": "PHP", "bufferCents": 20000, "dailyLimitCents": 1500, "origin": "manual" },
+    { "kind": "preferences", "currency": "PHP", "bufferCents": 25000, "dailyLimitCents": 1500, "origin": "manual" },
+    { "kind": "preferences", "currency": "PHP", "bufferCents": 30000, "dailyLimitCents": 1500, "origin": "manual" },
+    { "kind": "preferences", "currency": "PHP", "bufferCents": 30000, "dailyLimitCents": 2000, "origin": "manual" },
+    { "kind": "preferences", "currency": "PHP", "bufferCents": 35000, "dailyLimitCents": 2000, "origin": "manual" },
+    { "kind": "preferences", "currency": "PHP", "bufferCents": 40000, "dailyLimitCents": 2000, "origin": "manual" },
+    { "kind": "preferences", "currency": "PHP", "bufferCents": 40000, "dailyLimitCents": 2500, "origin": "manual" },
+    { "kind": "habit", "type": "higher-weekend-spending", "weekendDays": 3, "weekdayDays": 3, "observedThrough": "2026-11-07" },
+    { "kind": "habit", "type": "higher-weekend-spending", "weekendDays": 4, "weekdayDays": 5, "observedThrough": "2026-11-08" },
+    { "kind": "habit", "type": "recent-spending-spike", "recentDays": 3, "previousDays": 3, "observedThrough": "2026-11-09" }
+  ]
+}

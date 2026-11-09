@@ -1,0 +1,171 @@
+import React, { useEffect, useState } from 'react';
+import { formatMoney, parseMoney, validateDate } from './domain';
+import { JOURNAL_KEY, newJournal, savings, validateJournal, type PhoneJournal } from './phoneJournal';
+import PhoneWalrus from './PhoneWalrus';
+import PhoneRecovery from './PhoneRecovery';
+import PhoneWallet from './PhoneWallet';
+import { newMemoryCode } from './phoneNetwork';
+import { usePhoneAutoMemory } from './phoneAutoMemory';
+import { usePhoneHabitMemory, usePhoneSpikeMemory } from './phoneHabitMemory';
+import { dailyHabitMemory, nextDay, parseDailyHabitMemory, parseSpikeMemory, spikeMemory } from './phoneHabit';
+import './simple.css';
+
+type Panel = 'income' | 'expense' | 'contribution' | 'goal' | 'balance' | 'settings' | null;
+function localDate() { return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
+function load() {
+  try {
+    const raw = localStorage.getItem(JOURNAL_KEY);
+    return { raw, journal: raw === null ? null : validateJournal(JSON.parse(raw)), error: '' };
+  } catch { return { raw: null, journal: null, error: 'Could not read the journal on this device. Do not clear your browser data.' }; }
+}
+
+export default function PhoneApp() {
+  const [initial] = useState(load);
+  const [journal, setJournal] = useState(initial.journal);
+  const [raw, setRaw] = useState(initial.raw);
+  const [error, setError] = useState(initial.error);
+  const [notice, setNotice] = useState('');
+  const [panel, setPanel] = useState<Panel>(null);
+  const [tab, setTab] = useState<'home' | 'activity' | 'profile'>('home');
+  const [memoryToolsOpen, setMemoryToolsOpen] = useState(false);
+  const autoMemory = usePhoneAutoMemory(journal);
+  const [onboardAuto, setOnboardAuto] = useState(false);
+  const [onboardHabits, setOnboardHabits] = useState(false);
+  const [onboardRecent, setOnboardRecent] = useState(false);
+  const [onboardCode, setOnboardCode] = useState('');
+  const [onboardExisting, setOnboardExisting] = useState(false);
+  const [onboardSaved, setOnboardSaved] = useState(false);
+  const [settingsAuto, setSettingsAuto] = useState(false);
+  const [settingsHabits, setSettingsHabits] = useState(false);
+  const [settingsRecent, setSettingsRecent] = useState(false);
+  const [settingsCode, setSettingsCode] = useState('');
+  const [settingsPersonal, setSettingsPersonal] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsRestoring, setSettingsRestoring] = useState(false);
+  const today = localDate();
+  const habit = usePhoneHabitMemory(journal, today, autoMemory.config.enabled && !autoMemory.config.restorePending && autoMemory.config.habits, autoMemory.config.code, autoMemory.config.personal);
+  const recent = usePhoneSpikeMemory(journal, today, autoMemory.config.enabled && !autoMemory.config.restorePending && autoMemory.config.recentHabits, autoMemory.config.code, autoMemory.config.personal);
+  const summary = journal ? savings(journal, today, habit.remembered?.days ?? [], Boolean(recent.remembered)) : null;
+  const tomorrowDate = nextDay(today);
+  const tomorrow = journal ? savings({ ...journal, entries: journal.entries.filter(entry => entry.date <= today), adjustments: journal.adjustments.filter(item => item.date <= today) }, tomorrowDate, habit.remembered ? parseDailyHabitMemory(dailyHabitMemory(habit.remembered), tomorrowDate)?.days ?? [] : [], Boolean(recent.remembered && parseSpikeMemory(spikeMemory(recent.remembered), tomorrowDate))) : null;
+  const money = (cents: number) => formatMoney(cents, journal?.currency ?? 'PHP');
+  const habitStatuses = [...new Set([habit.status, recent.status].filter(Boolean))];
+  useEffect(() => {
+    if (panel === 'settings') document.getElementById('phone-savings-settings')?.scrollIntoView({ block: 'start' });
+  }, [panel]);
+
+  function save(next: PhoneJournal, expected = raw) {
+    try {
+      const current = localStorage.getItem(JOURNAL_KEY);
+      if (current !== expected) throw new Error('This journal changed in another tab. Reload before saving.');
+      const value = JSON.stringify(validateJournal(next));
+      localStorage.setItem(JOURNAL_KEY, value);
+      setRaw(value); setJournal(JSON.parse(value)); setError(''); setPanel(null);
+      return true;
+    } catch (e) { setError(e instanceof Error && e.message.includes('another tab') ? e.message : 'Could not save on this device. Check browser storage and try again.'); return false; }
+  }
+
+  function exportBackup() {
+    if (!journal) return;
+    const blob = new Blob([JSON.stringify(journal, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob), link = document.createElement('a');
+    link.href = url; link.download = `coinjar-backup-${today}.json`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setNotice('Backup download started. Keep the file somewhere safe. It contains your financial details.');
+  }
+
+  async function restore(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
+    if (!file) return;
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error('This backup is too large.');
+      const restored = validateJournal(JSON.parse(await file.text()));
+      const current = localStorage.getItem(JOURNAL_KEY);
+      if (current !== null && !window.confirm('This will replace the journal on this device. Download a backup of your current journal first if you want to keep it. Continue?')) return;
+      if (save(restored, current)) setNotice('Backup restored on this device.');
+    } catch { setError('This backup could not be read. Your current journal was not changed.'); }
+  }
+
+  function setup(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const f = new FormData(event.currentTarget), currency = String(f.get('currency'));
+      if (currency !== 'PHP' && currency !== 'USD') throw new Error('Choose a currency.');
+      const nickname = String(f.get('nickname') ?? '').trim();
+      if (!nickname) throw new Error('Enter your nickname.');
+      if (onboardAuto && !/^[A-Za-z0-9_-]{43}$/.test(onboardCode)) throw new Error('Enter a valid memory code.');
+      if (onboardAuto && !onboardSaved) throw new Error('Save your memory code before continuing.');
+      const j = newJournal(currency, parseMoney(String(f.get('amount') ?? '')), today, nickname);
+      if (save(j)) {
+        if (onboardAuto) {
+          try { autoMemory.configure(true, onboardCode, onboardHabits, onboardRecent, true, onboardExisting); setOnboardAuto(false); }
+          catch { setError('Journal saved, but memory setup could not be completed.'); return; }
+        }
+        setNotice('');
+      }
+    } catch (e) { setError(e instanceof Error && (e.message.includes('memory code') || e.message.includes('nickname')) ? e.message : 'Choose a currency and enter a valid balance.'); }
+  }
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!journal || !panel || !summary) return;
+    try {
+      const f = new FormData(event.currentTarget), now = new Date().toISOString();
+      let next: PhoneJournal = { ...journal };
+      if (panel === 'settings') {
+        const code = settingsCode.trim();
+        if (settingsAuto && !/^[A-Za-z0-9_-]{43}$/.test(code)) throw new Error('Enter the 43-character Walrus access code.');
+        if (settingsAuto && settingsPersonal && !settingsSaved) throw new Error('Save your memory code before continuing.');
+      }
+      else if (panel === 'goal') {
+        const title = String(f.get('title') ?? '').trim(), targetCents = parseMoney(String(f.get('amount') ?? '')), targetDate = String(f.get('date') ?? '');
+        if (!title || !targetCents) throw new Error('Enter a goal name and an amount above zero.');
+        if (!validateDate(targetDate) || targetDate < today) throw new Error('Choose a target date today or later.');
+        const changedPlan = !journal.goal || journal.goal.targetCents !== targetCents || journal.goal.targetDate !== targetDate;
+        const days = Math.floor((Date.parse(`${targetDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000) + 1;
+        next.goal = { id: journal.goal?.id ?? crypto.randomUUID(), title, targetCents, targetDate, ...(changedPlan ? { phoneStartDate: today, phoneBaselineCents: Math.ceil(Math.max(0, targetCents - summary.summary.savedCents) / days) } : { ...(journal.goal?.phoneStartDate ? { phoneStartDate: journal.goal.phoneStartDate } : {}), ...(journal.goal?.phoneBaselineCents !== undefined ? { phoneBaselineCents: journal.goal.phoneBaselineCents } : {}) }), status: 'active', createdAt: journal.goal?.createdAt ?? now };
+      } else if (panel === 'balance') {
+        const value = parseMoney(String(f.get('amount') ?? '')), deltaCents = value - summary.summary.availableCents;
+        if (!Number.isSafeInteger(deltaCents)) throw new Error('Amount is too large.');
+        next.adjustments = [...journal.adjustments, { id: crypto.randomUUID(), date: today, deltaCents, createdAt: now }];
+      } else {
+        const amountCents = parseMoney(String(f.get('amount') ?? '')), date = String(f.get('date') ?? ''), note = String(f.get('note') ?? '').trim();
+        if (!amountCents) throw new Error('Enter an amount above zero.');
+        if (date < journal.openingDate || date > today) throw new Error('Choose a date from your opening balance through today.');
+        if (panel === 'contribution' && amountCents > Math.max(0, summary.summary.availableCents)) throw new Error('Recorded savings cannot exceed your available balance.');
+        next.entries = [...journal.entries, { id: crypto.randomUUID(), kind: panel, amountCents, date, note, createdAt: now }];
+      }
+      if (save(next)) {
+        if (panel === 'settings') {
+          try { autoMemory.configure(settingsAuto, settingsCode.trim(), settingsHabits, settingsRecent, settingsPersonal, settingsRestoring); setOnboardAuto(false); } catch { setError('Settings saved, but automatic Walrus saving could not be changed. Check browser storage.'); return; }
+        }
+        setNotice('');
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Check the details and try again.'); }
+  }
+
+  const backup = <section hidden data-testid="backup-controls" className="simple-section"><h2>Backup and restore</h2><p className="simple-hint">Your journal stays in this browser on this device. Clearing browser data or losing your phone can erase it. Download a backup after making changes and keep it somewhere safe.</p><p className="simple-hint">Anyone who can open this browser can see your journal. Backup files are not encrypted, so anyone with a copy can read them.</p>{journal && <button className="simple-button outline" onClick={exportBackup}>Download backup</button>}<label className="simple-file-label">Restore backup<input type="file" accept=".json,application/json" onChange={event => void restore(event)} /></label></section>;
+  const panelForm = journal && panel && <section className="simple-form"><div className="simple-label-row"><h2 id={panel === 'settings' ? 'phone-savings-settings' : undefined}>{({ income: 'Add income', expense: 'Add expense', contribution: 'Add savings', goal: 'Savings goal', balance: 'Update balance', settings: 'Savings settings' })[panel]}</h2><button className="simple-link" onClick={() => setPanel(null)}>Cancel</button></div><form onSubmit={submit} key={panel}>
+    {panel === 'goal' && <label>Goal name<input name="title" required maxLength={80} defaultValue={journal.goal?.title ?? ''} /></label>}
+    {panel === 'settings' ? <AutoMemoryFields enabled={settingsAuto} onChange={enabled => { setSettingsAuto(enabled); if (enabled && !settingsCode) { setSettingsCode(newMemoryCode()); setSettingsPersonal(true); setSettingsSaved(false); setSettingsRestoring(false); } }} code={settingsCode} onCodeChange={value => { setSettingsCode(value); if (settingsPersonal) setSettingsRestoring(true); }} personal={settingsPersonal} saved={settingsSaved} onSavedChange={setSettingsSaved} habits={settingsHabits} onHabitsChange={setSettingsHabits} recent={settingsRecent} onRecentChange={setSettingsRecent} /> : <label>{panel === 'goal' ? 'Goal target' : 'Amount'} in {journal.currency}<input name="amount" inputMode="decimal" required defaultValue={panel === 'goal' && journal.goal ? (journal.goal.targetCents / 100).toFixed(2) : ''} /></label>}
+    {panel === 'goal' && <><label>Target date<input name="date" type="date" min={today} required defaultValue={journal.goal?.targetDate ?? ''} /></label><p className="simple-hint">Your daily plan includes today and your target date.</p></>}
+    {['income', 'expense', 'contribution'].includes(panel) && <><label>Note (optional)<input name="note" maxLength={80} /></label><label>Date<input name="date" type="date" min={journal.openingDate} max={today} defaultValue={today} required /></label></>}
+    {panel === 'contribution' && <p className="simple-hint">This records money you set aside. CoinJar does not move money.</p>}<button className="simple-button primary">Save</button></form></section>;
+  return <div className="simple-shell hosted-savings"><header className="simple-header"><span className="simple-brand">coinjar<span>.</span></span>{journal?.nickname && <span>Hi, {journal.nickname}</span>}</header><main className="simple-main">{error && <p className="simple-error" role="alert">{error}</p>}{notice && <p className="simple-notice" role="status">{notice}</p>}
+    {!journal ? <><section className="simple-balance"><h1>Your money, your way.</h1><form className="simple-form" onSubmit={setup}><label>Nickname<input name="nickname" maxLength={40} autoComplete="nickname" required /></label><label>Currency<select name="currency" required defaultValue=""><option value="" disabled>Choose a currency</option><option value="PHP">Philippine peso (PHP)</option><option value="USD">US dollar (USD)</option></select></label><label>Current balance<input name="amount" inputMode="decimal" required /></label><fieldset className="simple-memory-settings"><legend>Optional</legend><label className="simple-check"><input type="checkbox" checked={onboardAuto} onChange={event => { const enabled = event.target.checked; setOnboardAuto(enabled); setOnboardSaved(false); if (enabled && !onboardCode) setOnboardCode(newMemoryCode()); }} /> Automatically save preferences</label>{onboardAuto && <><p className="simple-hint">Memory is in test mode. Use fictional preferences only.</p><label>Memory access code<input value={onboardCode} readOnly={!onboardExisting} onChange={event => { setOnboardCode(event.target.value.trim()); setOnboardSaved(false); }} autoComplete="off" /></label><button type="button" className="simple-link" onClick={() => { if (navigator.clipboard) void navigator.clipboard.writeText(onboardCode).then(() => setNotice('Memory code copied.'), () => setNotice('Select the code to copy it.')); else setNotice('Select the code to copy it.'); }}>Copy code</button><button type="button" className="simple-link" onClick={() => { setOnboardExisting(!onboardExisting); setOnboardCode(onboardExisting ? newMemoryCode() : ''); setOnboardSaved(false); }}>{onboardExisting ? 'Generate a new code' : 'Use an existing code'}</button><label className="simple-check"><input type="checkbox" checked={onboardSaved} onChange={event => setOnboardSaved(event.target.checked)} required /> I saved my memory code</label><p className="simple-hint">Keep this code safe. You’ll need it to find your memories on another device.</p><label className="simple-check"><input type="checkbox" checked={onboardHabits || onboardRecent} onChange={event => { setOnboardHabits(event.target.checked); setOnboardRecent(event.target.checked); }} /> Remember spending patterns</label></>}</fieldset><button className="simple-button primary">Continue</button></form></section>{backup}</> : <>
+      <nav className="phone-nav" aria-label="Main navigation">{(['home', 'activity', 'profile'] as const).map(item => <button key={item} type="button" aria-current={tab === item ? 'page' : undefined} onClick={() => { setTab(item); setPanel(null); setError(''); }}>{item === 'home' ? 'Home' : item === 'activity' ? 'Activity' : 'Profile'}</button>)}</nav>
+      {tab === 'home' && <>
+        {autoMemory.config.restorePending && <p className="simple-hint" role="status">Review your saved preferences in Profile before syncing.</p>}
+        <section className="simple-balance"><div className="simple-label-row"><h1>Balance</h1><button className="simple-link" onClick={() => setPanel('balance')}>Update balance</button></div><p className="simple-amount">{money(summary!.summary.availableCents)}</p><div className="simple-actions"><button className="simple-button primary" onClick={() => setPanel('expense')}>Add expense</button><button className="simple-button outline" onClick={() => setPanel('income')}>Add income</button></div></section>
+        {panel !== 'settings' && panelForm}
+        <section className="simple-section"><div className="simple-label-row"><h2>Savings goal</h2>{journal.goal && <button className="simple-link" onClick={() => setPanel('goal')}>Edit goal</button>}</div>{journal.goal ? <><p className="simple-jar-amount">{journal.goal.title}</p><p className="simple-hint">{money(summary!.summary.savedCents)} saved of {money(journal.goal.targetCents)} · {Math.round(summary!.summary.progress * 100)}%</p></> : <p className="simple-empty">Choose something you’re saving for.</p>}<div className="simple-actions goal-actions">{!journal.goal && <button className="simple-button primary" onClick={() => setPanel('goal')}>Create goal</button>}<button className="simple-button outline" onClick={() => setPanel('contribution')}>Add savings</button></div></section>
+        <section className="simple-section"><h2>Daily savings suggestion</h2><h3>Today</h3><p className="simple-jar-amount">{money(summary!.recommendation.amountCents)}</p><p className="simple-hint">{summary!.recommendation.reasons.join(' ') || 'Based on your goal and recorded balance.'}</p><h3>Tomorrow’s estimate</h3><p className="simple-jar-amount">{money(tomorrow!.recommendation.amountCents)}</p>{journal.goal && <p className="simple-hint">Assuming no more entries today.</p>}<p className="simple-hint">{tomorrow!.recommendation.reasons.filter(reason => !summary!.recommendation.reasons.includes(reason)).join(' ')}</p>{Boolean(habit.remembered?.days.length) && <p className="simple-hint">Walrus remembers your spending patterns across the week.</p>}{recent.remembered && <p className="simple-hint">Walrus remembers a recent spending increase.</p>}{habitStatuses.map(status => <p key={status} className="simple-hint" role="status">{status}</p>)}</section>
+      </>}
+      {tab === 'activity' && <section className="simple-section"><h1>Recent activity</h1>{journal.entries.length ? [...journal.entries].reverse().map(entry => <div className="simple-row" key={entry.id}><div><strong>{entry.note || (entry.kind === 'income' ? 'Income' : entry.kind === 'expense' ? 'Expense' : 'Recorded saving')}</strong><small>{entry.date}</small></div><strong>{entry.kind === 'income' ? '+' : '−'}{money(entry.amountCents)}</strong></div>) : <p className="simple-empty">Your activity will appear here.</p>}</section>}
+      {tab === 'profile' && <><section className="simple-section"><h1>Profile</h1><p className="simple-hint">{journal.nickname || 'Your profile'} · {journal.currency}</p></section><section className="simple-section profile-settings"><h2>Memory settings</h2><p className="simple-hint">Choose how CoinJar remembers your spending patterns.</p><button className="simple-button outline" onClick={() => { setSettingsAuto(autoMemory.config.enabled); setSettingsHabits(autoMemory.config.habits); setSettingsRecent(autoMemory.config.recentHabits); setSettingsCode(autoMemory.config.code); setSettingsPersonal(autoMemory.config.personal || !autoMemory.config.enabled); setSettingsSaved(autoMemory.config.enabled); setSettingsRestoring(autoMemory.config.restorePending); setPanel('settings'); }}>Savings settings</button>{autoMemory.status && <p className="simple-hint" role="status">{autoMemory.status}</p>}{panel === 'settings' && panelForm}</section><PhoneRecovery journal={journal} memoryCode={autoMemory.config.code} apply={value => save(value)} /><PhoneWallet code={autoMemory.config.code} personal={autoMemory.config.enabled && autoMemory.config.personal} /><details className="simple-section" open={memoryToolsOpen || autoMemory.config.restorePending} onToggle={event => setMemoryToolsOpen(event.currentTarget.open)}><summary>Memory tools</summary><PhoneWalrus journal={journal} apply={value => { const applied = save(value); if (applied && autoMemory.config.restorePending) autoMemory.finishRecovery(); return applied; }} personal={autoMemory.config.personal} savedCode={autoMemory.config.code} /></details></>}{backup}</>}
+  </main></div>;
+}
+
+function AutoMemoryFields({ enabled, onChange, code, onCodeChange, personal, saved, onSavedChange, habits, onHabitsChange, recent, onRecentChange }: { enabled: boolean; onChange: (value: boolean) => void; code: string; onCodeChange: (value: string) => void; personal: boolean; saved: boolean; onSavedChange: (value: boolean) => void; habits: boolean; onHabitsChange: (value: boolean) => void; recent: boolean; onRecentChange: (value: boolean) => void }) {
+  return <fieldset className="simple-memory-settings"><legend>Optional</legend><label className="simple-check"><input type="checkbox" checked={enabled} onChange={event => onChange(event.target.checked)} /> Automatically save preferences</label>{enabled && <><p className="simple-hint">Memory is in test mode. Use fictional preferences only.</p><label>Walrus access code<input name="walrusCode" type={personal ? 'text' : 'password'} autoComplete="off" required value={code} onChange={event => { onCodeChange(event.target.value.trim()); if (personal) onSavedChange(false); }} /></label>{personal && <><button type="button" className="simple-link" onClick={() => { if (navigator.clipboard) void navigator.clipboard.writeText(code); }}>Copy code</button><label className="simple-check"><input type="checkbox" checked={saved} onChange={event => onSavedChange(event.target.checked)} required /> I saved my memory code</label></>}<label className="simple-check"><input type="checkbox" checked={habits || recent} onChange={event => { onHabitsChange(event.target.checked); onRecentChange(event.target.checked); }} /> Remember spending patterns</label><p className="simple-hint">Includes spending increases and patterns on any day of the week. Amounts and notes stay on your phone.</p></>}</fieldset>;
+}
