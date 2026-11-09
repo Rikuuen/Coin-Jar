@@ -7,6 +7,37 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test('recovery prompt fits phone widths and helper text has readable contrast', async ({ page }) => {
+  await page.goto('/'); await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  for (const width of [320, 375, 430]) {
+    await page.setViewportSize({ width, height: 915 });
+    const size = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: innerWidth, button: document.querySelector('.phone-banner button')!.getBoundingClientRect().right }));
+    expect(size.page).toBeLessThanOrEqual(size.viewport); expect(size.button).toBeLessThanOrEqual(size.viewport);
+  }
+  await page.getByRole('button', { name: 'Profile', exact: true }).click();
+  const ratio = await page.locator('.profile-settings .simple-hint').evaluate(element => {
+    const rgb = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+    const luminance = (values: number[]) => values.map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const foreground = luminance(rgb(getComputedStyle(element).color));
+    const background = luminance(rgb(getComputedStyle(element.closest('section')!).backgroundColor));
+    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+  });
+  expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+
+test('activity groups entries and calculates the last seven days', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-10T12:00:00Z'));
+  await page.addInitScript(() => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify({ version: 1, nickname: 'Fictional', currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, adjustments: [], goal: null, entries: [
+    { id: 'old', kind: 'income', amountCents: 90000, date: '2026-01-02', note: 'Old income', createdAt: '' },
+    { id: 'income', kind: 'income', amountCents: 10000, date: '2026-01-08', note: 'Pay', createdAt: '' },
+    { id: 'expense', kind: 'expense', amountCents: 2000, date: '2026-01-09', note: 'Lunch', createdAt: '' },
+    { id: 'saving', kind: 'contribution', amountCents: 3000, date: '2026-01-10', note: '', createdAt: '' },
+  ] })));
+  await page.goto('/'); await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  const week = page.getByLabel('Last 7 days'); await expect(week).toContainText('₱100.00'); await expect(week).toContainText('₱20.00'); await expect(week).toContainText('₱30.00'); await expect(week).not.toContainText('₱900.00');
+  await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible(); await expect(page.getByRole('heading', { name: 'Yesterday', exact: true })).toBeVisible(); await expect(page.getByText('Lunch')).toBeVisible();
+});
+
 test('both old journals stay separate and open from the plain link', async ({ browser }) => {
   const context = await browser.newContext();
   await context.addInitScript(() => {

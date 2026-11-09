@@ -6,7 +6,7 @@
 .simple-shell.phone-app {
   --ink: #0f0f0f;
   --ink-2: #545454;
-  --muted: #7b7b7b;
+  --muted: #6a6a6a;
   --canvas: #ffffff;
   --card: #f5f5f4;
   --line: rgba(0, 0, 0, .07);
@@ -124,6 +124,7 @@
 .phone-app .simple-section input:focus, .phone-app .simple-section select:focus { outline: none; border-color: var(--ink); }
 .phone-app .simple-section .simple-actions { margin-top: 12px; }
 .phone-app .simple-section > .simple-button { width: 100%; max-width: none; margin-top: 12px; }
+.phone-app .phone-banner > .simple-button { width: auto; }
 .phone-app .simple-section .simple-check { margin-top: 12px; color: var(--ink-2); font-size: 13px; font-weight: 600; }
 .phone-app .simple-check input { accent-color: var(--green); }
 .phone-app .simple-button:disabled { opacity: .35; cursor: not-allowed; transform: none; }
