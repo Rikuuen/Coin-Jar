@@ -1,6 +1,51 @@
 import { test, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 
+test('automatic encrypted recovery follows journal changes and pauses on another device', async ({ browser }) => {
+  const first = await browser.newContext(), second = await browser.newContext();
+  let envelope: unknown, writes = 0;
+  const handle = async (route: import('@playwright/test').Route) => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'backupSave') { envelope = body.envelope; writes++; await route.fulfill({ json: { saved: true } }); }
+    else if (body.action === 'backupRestore' && envelope) await route.fulfill({ json: { envelope } });
+    else await route.fulfill({ status: 404, json: { error: 'No recovery backup found.' } });
+  };
+  await first.route('**/api/phone/walrus', handle); await second.route('**/api/phone/walrus', handle);
+  const page = await first.newPage(); await page.goto('/?walrus=mainnet-demo');
+  await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click();
+  const key = await page.getByLabel('Recovery key', { exact: true }).inputValue();
+  await page.getByLabel('I saved my recovery key').check(); await page.getByLabel('Automatically back up journal').check();
+  await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
+  await page.getByRole('button', { name: 'Home' }).click(); await page.getByRole('button', { name: 'Add expense' }).click();
+  await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Private fictional lunch'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(() => writes).toBe(2); expect(JSON.stringify(envelope)).not.toContain('Private fictional lunch');
+  await first.setOffline(true); await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('10'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(2);
+  await first.setOffline(false); await expect.poll(() => writes).toBe(3); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible();
+  const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo');
+  await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();
+  await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill(key); await other.getByLabel('I saved my recovery key').check(); await other.getByLabel('Automatically back up journal').check();
+  await expect(other.getByText('Automatic backup paused:', { exact: false })).toBeVisible(); expect(writes).toBe(3);
+  const dismissed = other.waitForEvent('dialog').then(dialog => dialog.dismiss()); await other.getByRole('button', { name: 'Use this journal for backups' }).click(); await dismissed; await expect(other.getByText('Automatic backup paused:', { exact: false })).toBeVisible(); expect(writes).toBe(3);
+  const accepted = other.waitForEvent('dialog').then(dialog => dialog.accept()); await other.getByRole('button', { name: 'Use this journal for backups' }).click(); await accepted; await expect.poll(() => writes).toBe(4); await expect(other.getByText('Journal backed up to Walrus.')).toBeVisible();
+  await first.close(); await second.close();
+});
+
+test('automatic recovery checks an uncertain write before retrying', async ({ page }) => {
+  let envelope: unknown, writes = 0;
+  await page.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'backupSave') { envelope = body.envelope; writes++; await route.fulfill({ status: 502, json: { error: 'Outcome unknown.' } }); }
+    else if (envelope) await route.fulfill({ json: { envelope } });
+    else await route.fulfill({ status: 404, json: { error: 'No recovery backup found.' } });
+  });
+  await page.goto('/?walrus=mainnet-demo'); await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click(); await page.getByLabel('I saved my recovery key').check(); await page.getByLabel('Automatically back up journal').check();
+  await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(1);
+  await page.getByRole('button', { name: 'Retry backup' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
+});
+
 test('encrypted journal recovery restores activity in a separate browser without sending the key', async ({ browser }) => {
   const first = await browser.newContext(), second = await browser.newContext();
   let record: { token: string; envelope: unknown } | undefined;
@@ -27,7 +72,7 @@ test('encrypted journal recovery restores activity in a separate browser without
   await other.getByRole('button', { name: 'Home' }).click(); await expect(other.locator('.simple-amount')).toHaveText('₱10.00');
   await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill(key);
   other.once('dialog', dialog => void dialog.accept()); await other.getByRole('button', { name: 'Restore journal' }).click();
-  await expect(other.getByText('Journal restored on this device.')).toBeVisible(); await other.getByRole('button', { name: 'Home' }).click();
+  await expect(other.getByText('Journal restored on this device.', { exact: false })).toBeVisible(); await other.getByRole('button', { name: 'Home' }).click();
   await expect(other.locator('.simple-amount')).toHaveText('₱950.00'); await other.getByRole('button', { name: 'Activity' }).click(); await expect(other.getByText('Fictional lunch')).toBeVisible();
   await first.close(); await second.close();
 });

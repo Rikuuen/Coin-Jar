@@ -37,9 +37,9 @@ export async function decryptJournal(code: string, envelope: Envelope) {
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, key, ciphertext);
   return validateJournal(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plaintext)));
 }
-export async function recoveryRequest(code: string, action: 'backupSave' | 'backupRestore', envelope?: Envelope) {
+export async function recoveryRequest(code: string, action: 'backupSave' | 'backupRestore', envelope?: Envelope, operationId: string = crypto.randomUUID()) {
   const { token } = await keys(code);
-  const response = await fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-coinjar-memory-network': 'mainnet', 'x-coinjar-recovery': '1', ...(mainnetDemo ? { 'x-coinjar-memory-demo': '1' } : {}) }, body: JSON.stringify({ consent: true, action, ...(envelope ? { envelope, operationId: crypto.randomUUID() } : {}) }) });
+  const response = await fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-coinjar-memory-network': 'mainnet', 'x-coinjar-recovery': '1', ...(mainnetDemo ? { 'x-coinjar-memory-demo': '1' } : {}) }, body: JSON.stringify({ consent: true, action, ...(envelope ? { envelope, operationId } : {}) }) });
   const result = await response.json();
   if (!response.ok) throw Error(result.error || 'Recovery unavailable.');
   return result;
