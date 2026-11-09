@@ -1,11 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { createHash } from 'node:crypto';
-
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    if (!localStorage.getItem('coinjar.phone.journal-space.v1')) localStorage.setItem('coinjar.phone.journal-space.v1', new URLSearchParams(location.search).get('walrus') === 'mainnet-demo' ? 'legacy' : 'regular');
-  });
-});
+import { createHash, randomBytes } from 'node:crypto';
+import { encryptJournal } from '../src/journalCipher';
+import { newJournal } from '../src/phoneJournal';
 
 test('recovery prompt fits phone widths and helper text has readable contrast', async ({ page }) => {
   await page.goto('/'); await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -27,7 +23,7 @@ test('recovery prompt fits phone widths and helper text has readable contrast', 
 
 test('activity groups entries and calculates the last seven days', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-01-10T12:00:00Z'));
-  await page.addInitScript(() => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify({ version: 1, nickname: 'Fictional', currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, adjustments: [], goal: null, entries: [
+  await page.addInitScript(() => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, nickname: 'Fictional', currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, adjustments: [], goal: null, entries: [
     { id: 'old', kind: 'income', amountCents: 90000, date: '2026-01-02', note: 'Old income', createdAt: '' },
     { id: 'income', kind: 'income', amountCents: 10000, date: '2026-01-08', note: 'Pay', createdAt: '' },
     { id: 'expense', kind: 'expense', amountCents: 2000, date: '2026-01-09', note: 'Lunch', createdAt: '' },
@@ -38,7 +34,7 @@ test('activity groups entries and calculates the last seven days', async ({ page
   await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible(); await expect(page.getByRole('heading', { name: 'Yesterday', exact: true })).toBeVisible(); await expect(page.getByText('Lunch')).toBeVisible();
 });
 
-test('both old journals stay separate and open from the plain link', async ({ browser }) => {
+test('plain link opens the longer-link journal without exposing or deleting the other journal', async ({ browser }) => {
   const context = await browser.newContext();
   await context.addInitScript(() => {
     if (sessionStorage.getItem('seeded')) return;
@@ -47,12 +43,13 @@ test('both old journals stay separate and open from the plain link', async ({ br
     localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ ...journal, nickname: 'Long link' }));
     localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify({ ...journal, nickname: 'Plain link' }));
     localStorage.setItem('coinjar.phone.recovery.key.v1.demo', 'preserved-marker');
+    localStorage.setItem('coinjar.phone.journal-space.v1', 'regular');
   });
   const page = await context.newPage(); await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Choose your journal' })).toBeVisible();
-  await page.getByRole('button', { name: 'Open journal from the longer link' }).click(); await expect(page.getByText('Hi, Long link')).toBeVisible();
+  await expect(page.getByText('Hi, Long link')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Choose your journal' })).toHaveCount(0);
   await page.goto('/?walrus=mainnet-demo'); await expect(page.getByText('Hi, Long link')).toBeVisible(); expect(new URL(page.url()).searchParams.has('walrus')).toBe(false);
-  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Switch journal' }).click(); await page.getByRole('button', { name: 'Open journal from the plain link' }).click(); await expect(page.getByText('Hi, Plain link')).toBeVisible();
+  await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByRole('button', { name: 'Switch journal' })).toHaveCount(0); await page.reload(); await expect(page.getByText('Hi, Long link')).toBeVisible();
   expect(await page.evaluate(() => [localStorage.getItem('coinjar.phone.demo.journal.v1'), localStorage.getItem('coinjar.phone.journal.v1'), localStorage.getItem('coinjar.phone.recovery.key.v1.demo')])).toEqual([expect.stringContaining('Long link'), expect.stringContaining('Plain link'), 'preserved-marker']);
   await context.close();
 });
@@ -66,20 +63,18 @@ test('existing legacy journal uses mainnet from the plain link', async ({ browse
 });
 
 test('recovery finds an older regular-space backup from the plain link', async ({ browser }) => {
-  const first = await browser.newContext(), second = await browser.newContext(); let envelope: unknown, writes = 0;
-  await first.addInitScript(() => localStorage.setItem('coinjar.phone.journal-space.v1', 'regular'));
+  const second = await browser.newContext(); const key = randomBytes(32).toString('base64url');
+  let envelope: unknown = (await encryptJournal(key, newJournal('PHP', 100000, '2026-01-01', 'Older'))).envelope, writes = 0;
   const handle = async (route: import('@playwright/test').Route) => {
     const body = route.request().postDataJSON(), legacy = route.request().headers()['x-coinjar-memory-demo'] === '1';
     if (body.action === 'backupSave') { expect(legacy).toBe(false); envelope = body.envelope; writes++; await route.fulfill({ json: { saved: true } }); }
     else if (body.action === 'backupRestore' && envelope && !legacy) await route.fulfill({ json: { envelope } });
     else await route.fulfill({ status: 404, json: { error: 'No recovery backup found.' } });
   };
-  await first.route('**/api/phone/walrus', handle); await second.route('**/api/phone/walrus', handle);
-  const page = await first.newPage(); await page.goto('/'); await page.getByLabel('Nickname').fill('Older'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click(); const key = await page.getByLabel('Recovery key', { exact: true }).inputValue(); await page.getByRole('button', { name: 'I saved my recovery key' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible();
+  await second.route('**/api/phone/walrus', handle);
   const other = await second.newPage(); await other.goto('/'); await other.getByLabel('Nickname').fill('New'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click(); await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill(key); other.once('dialog', dialog => void dialog.accept()); await other.getByRole('button', { name: 'Restore journal' }).click(); await expect(other.getByText('Journal restored on this device.', { exact: false })).toBeVisible();
-  await other.getByRole('button', { name: 'Home' }).click(); await expect(other.locator('.simple-amount')).toHaveText('₱1,000.00'); await other.getByRole('button', { name: 'Add expense' }).click(); await other.getByLabel('Amount in PHP').fill('50'); await other.getByRole('button', { name: 'Save', exact: true }).click(); await expect.poll(() => writes).toBe(2);
-  await first.close(); await second.close();
+  await other.getByRole('button', { name: 'Home' }).click(); await expect(other.locator('.simple-amount')).toHaveText('₱1,000.00'); await other.getByRole('button', { name: 'Add expense' }).click(); await other.getByLabel('Amount in PHP').fill('50'); await other.getByRole('button', { name: 'Save', exact: true }).click(); await expect.poll(() => writes).toBe(1);
+  await second.close();
 });
 
 test('automatic backup pauses if the alternate recovery space cannot be checked', async ({ browser }) => {
@@ -412,7 +407,7 @@ test('phone journal saves its loop locally and restores only a valid confirmed b
 
 test('a damaged local journal is not silently replaced', async ({ page }) => {
   await page.goto('/');
-  await page.evaluate(() => localStorage.setItem('coinjar.phone.journal.v1', '{broken'));
+  await page.evaluate(() => localStorage.setItem('coinjar.phone.demo.journal.v1', '{broken'));
   await page.reload();
   await expect(page.getByRole('alert')).toContainText('Could not read');
   await page.getByLabel('Nickname').fill('Ari');
@@ -420,14 +415,14 @@ test('a damaged local journal is not silently replaced', async ({ page }) => {
   await page.getByLabel('Current balance').fill('10');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('another tab');
-  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.journal.v1'))).toBe('{broken');
+  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.demo.journal.v1'))).toBe('{broken');
 });
 
 test('goal coach reserves estimated spending only when needed', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-01-27T12:00:00Z'));
   const dates = ['2026-01-06', '2026-01-13', '2026-01-20', '2026-01-07', '2026-01-14', '2026-01-21'];
   const journal = { version: 1, currency: 'PHP', openingCents: 123000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: dates.map((date, i) => ({ id: `e${i}`, kind: 'expense', amountCents: [10000, 20000, 30000, 1000, 1000, 1000][i], date, note: '', createdAt: '' })), adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-02-05', status: 'active', createdAt: '' } };
-  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal); await page.goto('/');
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j)), journal); await page.goto('/');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
   await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱400.00');
   await expect(section.getByText('Estimated spending still to come: ₱200.00', { exact: false }).first()).toBeVisible();
@@ -465,8 +460,8 @@ test('goal coach recalculates after different daily savings', async ({ page }) =
 test('today and tomorrow stay distinct and learning appears once', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
   await page.addInitScript(() => {
-    localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 1500, entries: [{ id: 'c', kind: 'contribution', amountCents: 5000, date: '2026-01-09', note: '', createdAt: '2026-01-09T12:00:00Z' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 100000, targetDate: '2026-01-10', phoneStartDate: '2026-01-01', phoneBaselineCents: 1500, status: 'active', createdAt: '' } }));
-    localStorage.setItem('coinjar.phone.walrus.auto.v1', JSON.stringify({ enabled: true, habits: true, recentHabits: true, code: 'g'.repeat(43) }));
+    localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 1500, entries: [{ id: 'c', kind: 'contribution', amountCents: 5000, date: '2026-01-09', note: '', createdAt: '2026-01-09T12:00:00Z' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 100000, targetDate: '2026-01-10', phoneStartDate: '2026-01-01', phoneBaselineCents: 1500, status: 'active', createdAt: '' } }));
+    localStorage.setItem('coinjar.phone.walrus.auto.v1.mainnet-demo', JSON.stringify({ enabled: true, habits: true, recentHabits: true, code: 'g'.repeat(43) }));
   });
   await page.route('**/api/phone/walrus', async route => await route.fulfill({ json: route.request().postDataJSON().action === 'recallHabit' ? { memories: [] } : { saved: true } }));
   await page.goto('/');
@@ -580,7 +575,7 @@ test('automatic Walrus preferences opt in on onboarding and retry the same pendi
   await page.getByRole('button', { name: 'Profile' }).click();
   await page.getByRole('button', { name: 'Savings settings' }).click();
   await expect(page.getByLabel('Automatically save preferences')).not.toBeChecked();
-  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.walrus.auto.v1'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('coinjar.phone.walrus.auto.v1.mainnet-demo'))).toBeNull();
   expect(writes).toHaveLength(2);
 });
 
@@ -661,7 +656,7 @@ test('a separately approved recalled habit changes the next-day estimate and can
   await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
   const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'higher-day-spending', days: [6], sampleDays: [3], recordedDays: 7, observedThrough: '2026-01-08' });
   const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: [], adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-01-19', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
-  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal);
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j)), journal);
   let recalls = 0;
   await page.route('**/api/phone/walrus', async route => {
     const body = route.request().postDataJSON();
@@ -699,7 +694,7 @@ test('automatic habit saving sends aggregate evidence only and recalls it', asyn
   await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
   const dates = ['2025-12-20', '2025-12-27', '2026-01-03', '2025-12-21', '2025-12-28', '2026-01-04'];
   const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2025-12-20', bufferCents: 0, dailyLimitCents: 10000, entries: dates.map((date, i) => ({ id: `e${i}`, kind: 'expense', amountCents: i < 3 ? 200 : 50, note: 'private coffee', date, createdAt: '' })), adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-12-31', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
-  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal);
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j)), journal);
   let habit = '';
   await page.route('**/api/phone/walrus', async route => {
     const body = route.request().postDataJSON();
@@ -723,7 +718,7 @@ test('automatic habit saving sends aggregate evidence only and recalls it', asyn
 test('unavailable Walrus habits leave tomorrow’s estimate based on local data', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
   const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: [{ id: 'future', kind: 'expense', amountCents: 95000, note: '', date: '2026-01-10', createdAt: '' }], adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-01-19', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
-  await page.addInitScript(j => { localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)); localStorage.setItem('coinjar.phone.walrus.auto.v1', JSON.stringify({ enabled: true, habits: true, code: 'g'.repeat(43) })); }, journal);
+  await page.addInitScript(j => { localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j)); localStorage.setItem('coinjar.phone.walrus.auto.v1.mainnet-demo', JSON.stringify({ enabled: true, habits: true, code: 'g'.repeat(43) })); }, journal);
   await page.route('**/api/phone/walrus', async route => { const body = route.request().postDataJSON(); await route.fulfill(body.action === 'recallHabit' ? { status: 503, json: { error: 'unavailable' } } : { json: { saved: true } }); });
   await page.goto('/');
   await expect(page.getByText('Walrus habits unavailable.', { exact: false })).toBeVisible();
@@ -739,7 +734,7 @@ test('recent-spending memories require separate consent and adjust tomorrow with
   await page.clock.setFixedTime(new Date('2026-01-12T12:00:00Z'));
   const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'recent-spending-spike', recentDays: 3, previousDays: 4, observedThrough: '2026-01-11' });
   const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: [], adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-01-22', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
-  await page.addInitScript(j => localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j)), journal);
+  await page.addInitScript(j => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j)), journal);
   let recalls = 0;
   await page.route('**/api/phone/walrus', async route => { const body = route.request().postDataJSON(); if (body.action === 'recallHabit') { recalls++; await route.fulfill({ json: { memories: [memory] } }); } else await route.fulfill({ json: { saved: true } }); });
   await page.goto('/');
@@ -774,7 +769,7 @@ test('recent-spending detection saves only aggregate evidence', async ({ page })
   const dates = ['2026-01-13', '2026-01-14', '2026-01-15', '2026-01-06', '2026-01-07', '2026-01-08'];
   const journal = { version: 1, currency: 'PHP', openingCents: 100000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 10000, entries: dates.map((date, i) => ({ id: `e${i}`, kind: 'expense', amountCents: i < 3 ? 2000 : 500, note: 'private lunch', date, createdAt: '' })), adjustments: [], goal: { id: 'g', title: 'Fictional goal', targetCents: 100000, targetDate: '2026-12-31', phoneStartDate: '2026-01-01', phoneBaselineCents: 10000, status: 'active', createdAt: '' } };
   await page.addInitScript((j) => {
-    localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify(j));
+    localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j));
     const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'recent-spending-spike', recentDays: 3, previousDays: 3, observedThrough: '2026-01-01' });
     localStorage.setItem('coinjar.phone.walrus.spike.pending.v1', JSON.stringify({ memory, operationId: '00000000-0000-4000-8000-000000000000' }));
   }, journal);
@@ -788,7 +783,7 @@ test('recent-spending detection saves only aggregate evidence', async ({ page })
   await page.getByRole('button', { name: 'Profile' }).click();
   await page.getByRole('button', { name: 'Savings settings' }).click();
   await page.getByLabel('Automatically save preferences').check();
-  const personalPendingKey = 'coinjar.phone.walrus.spike.pending.v1.personal.' + createHash('sha256').update(await page.getByLabel('Walrus access code').inputValue()).digest('hex');
+  const personalPendingKey = 'coinjar.phone.walrus.spike.pending.v1.mainnet-demo.personal.' + createHash('sha256').update(await page.getByLabel('Walrus access code').inputValue()).digest('hex');
   await page.evaluate(key => {
     const memory = 'COINJAR_PHONE_HABIT_V1 ' + JSON.stringify({ type: 'recent-spending-spike', recentDays: 3, previousDays: 3, observedThrough: '2026-01-01' });
     localStorage.setItem(key, JSON.stringify({ memory, operationId: '00000000-0000-4000-8000-000000000001' }));
