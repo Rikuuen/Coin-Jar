@@ -2,7 +2,9 @@
 
 CoinJar is a phone-first savings journal. Set a currency and balance, record income and expenses, and choose a savings goal and target date. CoinJar suggests a daily amount and adjusts the pace as the goal progresses.
 
-The journal stays in the browser. Optional Walrus Memory stores approved preferences and spending patterns, and encrypted journal recovery lets you restore a saved snapshot using your recovery key. Encrypted backups start automatically once the separate recovery key is saved and confirmed. A goal can be linked to a public Sui address; read-only Tatum balance checks show SUI and changes since the previous check separately from recorded savings. A wallet change is not proof of a contribution, and a savings entry is not a bank transfer.
+The journal stays in the browser. Optional Walrus Memory stores approved preferences and spending patterns on mainnet, and encrypted journal recovery lets you restore a saved snapshot using your recovery key. Encrypted backups start automatically once the separate recovery key is saved and confirmed. Link a public Sui address in Profile; read-only Tatum balance checks on the goal show SUI and changes since the previous check separately from recorded savings. A wallet change is not proof of a contribution, and a savings entry is not a bank transfer.
+
+The plain app URL also opens journals previously accessed through the `walrus=mainnet-demo` URL without moving or deleting them. If both historical journals exist, choose one on the same URL; Profile can switch between them. Older recovery and personal memory namespaces remain accessible.
 
 ## Run the phone app
 

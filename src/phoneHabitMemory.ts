@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { detectedDailyHabit, detectedSpikeHabit, dailyHabitMemory, spikeMemory, parseDailyHabitMemory, parseSpikeMemory, type DailyHabit, type SpikeHabit } from './phoneHabit';
 import type { PhoneJournal } from './phoneJournal';
-import { memoryHeaders, memoryStorageSuffix, personalMemoryHeaders, personalStorageSuffix, walrusNetwork } from './phoneNetwork';
+import { memoryHeaders, memoryStorageSuffix, personalHeadersFor, personalStorageSuffix, walrusNetwork } from './phoneNetwork';
 
 type Codec<T> = { pending: string; detect: (journal: PhoneJournal, today: string) => T | null; encode: (habit: T) => string; parse: (text: unknown, today: string) => T | null; score: (habit: T) => number; useful?: (item: T) => boolean };
 const daily: Codec<DailyHabit> = { pending: 'coinjar.phone.walrus.days.pending.v1' + memoryStorageSuffix, detect: detectedDailyHabit, encode: dailyHabitMemory, parse: parseDailyHabitMemory, score: item => item.recordedDays, useful: item => item.days.length > 0 };
@@ -20,7 +20,7 @@ function useMemory<T extends { observedThrough: string }>(journal: PhoneJournal 
     const online = () => setRetry(n => n + 1);
     window.addEventListener('online', online);
     async function request(payload: object) {
-      const response = await fetch('/api/phone/walrus', { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${code}`, ...(personal ? personalMemoryHeaders : memoryHeaders) }, body: JSON.stringify({ consent: true, ...payload }) });
+      const response = await fetch('/api/phone/walrus', { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${code}`, ...(personal ? await personalHeadersFor(code) : memoryHeaders) }, body: JSON.stringify({ consent: true, ...payload }) });
       const value = await response.json();
       if (!response.ok) throw new Error('Walrus unavailable');
       return value;

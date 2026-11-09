@@ -1,6 +1,81 @@
 import { test, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('coinjar.phone.journal-space.v1')) localStorage.setItem('coinjar.phone.journal-space.v1', new URLSearchParams(location.search).get('walrus') === 'mainnet-demo' ? 'legacy' : 'regular');
+  });
+});
+
+test('both old journals stay separate and open from the plain link', async ({ browser }) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    if (sessionStorage.getItem('seeded')) return;
+    sessionStorage.setItem('seeded', '1');
+    const journal = { version: 1, currency: 'PHP', openingCents: 10000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: [], adjustments: [], goal: null };
+    localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ ...journal, nickname: 'Long link' }));
+    localStorage.setItem('coinjar.phone.journal.v1', JSON.stringify({ ...journal, nickname: 'Plain link' }));
+    localStorage.setItem('coinjar.phone.recovery.key.v1.demo', 'preserved-marker');
+  });
+  const page = await context.newPage(); await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Choose your journal' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open journal from the longer link' }).click(); await expect(page.getByText('Hi, Long link')).toBeVisible();
+  await page.goto('/?walrus=mainnet-demo'); await expect(page.getByText('Hi, Long link')).toBeVisible(); expect(new URL(page.url()).searchParams.has('walrus')).toBe(false);
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Switch journal' }).click(); await page.getByRole('button', { name: 'Open journal from the plain link' }).click(); await expect(page.getByText('Hi, Plain link')).toBeVisible();
+  expect(await page.evaluate(() => [localStorage.getItem('coinjar.phone.demo.journal.v1'), localStorage.getItem('coinjar.phone.journal.v1'), localStorage.getItem('coinjar.phone.recovery.key.v1.demo')])).toEqual([expect.stringContaining('Long link'), expect.stringContaining('Plain link'), 'preserved-marker']);
+  await context.close();
+});
+
+test('existing legacy journal uses mainnet from the plain link', async ({ browser }) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => { localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, nickname: 'Legacy', currency: 'PHP', openingCents: 10000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: [], adjustments: [], goal: null })); });
+  const page = await context.newPage(); await page.goto('/'); await expect(page.getByText('Hi, Legacy')).toBeVisible();
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Savings settings' }).click(); await page.getByLabel('Automatically save preferences').check();
+  await expect(page.getByLabel('Walrus access code')).toBeVisible(); await context.close();
+});
+
+test('recovery finds an older regular-space backup from the plain link', async ({ browser }) => {
+  const first = await browser.newContext(), second = await browser.newContext(); let envelope: unknown, writes = 0;
+  await first.addInitScript(() => localStorage.setItem('coinjar.phone.journal-space.v1', 'regular'));
+  const handle = async (route: import('@playwright/test').Route) => {
+    const body = route.request().postDataJSON(), legacy = route.request().headers()['x-coinjar-memory-demo'] === '1';
+    if (body.action === 'backupSave') { expect(legacy).toBe(false); envelope = body.envelope; writes++; await route.fulfill({ json: { saved: true } }); }
+    else if (body.action === 'backupRestore' && envelope && !legacy) await route.fulfill({ json: { envelope } });
+    else await route.fulfill({ status: 404, json: { error: 'No recovery backup found.' } });
+  };
+  await first.route('**/api/phone/walrus', handle); await second.route('**/api/phone/walrus', handle);
+  const page = await first.newPage(); await page.goto('/'); await page.getByLabel('Nickname').fill('Older'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click(); const key = await page.getByLabel('Recovery key', { exact: true }).inputValue(); await page.getByRole('button', { name: 'I saved my recovery key' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible();
+  const other = await second.newPage(); await other.goto('/'); await other.getByLabel('Nickname').fill('New'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click(); await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill(key); other.once('dialog', dialog => void dialog.accept()); await other.getByRole('button', { name: 'Restore journal' }).click(); await expect(other.getByText('Journal restored on this device.', { exact: false })).toBeVisible();
+  await other.getByRole('button', { name: 'Home' }).click(); await expect(other.locator('.simple-amount')).toHaveText('₱1,000.00'); await other.getByRole('button', { name: 'Add expense' }).click(); await other.getByLabel('Amount in PHP').fill('50'); await other.getByRole('button', { name: 'Save', exact: true }).click(); await expect.poll(() => writes).toBe(2);
+  await first.close(); await second.close();
+});
+
+test('automatic backup pauses if the alternate recovery space cannot be checked', async ({ browser }) => {
+  const context = await browser.newContext(); let writes = 0;
+  await context.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'backupSave') { writes++; return route.fulfill({ json: { saved: true } }); }
+    return route.fulfill(route.request().headers()['x-coinjar-memory-demo'] === '1' ? { status: 404, json: { error: 'No recovery backup found.' } } : { status: 502, json: { error: 'Provider unavailable.' } });
+  });
+  const page = await context.newPage(); await page.goto('/'); await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click(); await page.getByRole('button', { name: 'I saved my recovery key' }).click(); await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(0);
+  await context.close();
+});
+
+test('existing personal preferences can be found in the other mainnet namespace', async ({ browser }) => {
+  const context = await browser.newContext(); let savedInLegacy: boolean | undefined;
+  const memory = 'COINJAR_PHONE_PREFERENCES_V2 ' + JSON.stringify({ currency: 'PHP', origin: 'manual' });
+  await context.route('**/api/phone/walrus', async route => {
+    const body = route.request().postDataJSON(), legacy = route.request().headers()['x-coinjar-memory-demo'] === '1';
+    if (body.action === 'recall') return route.fulfill({ json: { memories: legacy ? [] : [memory] } });
+    if (body.action === 'remember') { savedInLegacy = legacy; return route.fulfill({ json: { saved: true } }); }
+    return route.fulfill({ json: { memories: [] } });
+  });
+  const page = await context.newPage(); await page.goto('/'); await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByLabel('Automatically save preferences').check(); await page.getByRole('button', { name: 'Use an existing code' }).click(); await page.getByLabel('Memory access code').fill('a'.repeat(43)); await page.getByLabel('I saved my memory code').check(); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); page.once('dialog', dialog => void dialog.accept()); await page.getByRole('button', { name: 'Find preferences' }).click(); await expect(page.getByRole('button', { name: 'Review memory 1' })).toBeVisible(); page.once('dialog', dialog => void dialog.accept()); await page.getByRole('button', { name: 'Review memory 1' }).click(); await expect(page.getByText('Saved preferences applied on this device.')).toBeVisible(); await expect.poll(() => savedInLegacy).toBe(false);
+  await context.close();
+});
+
 test('automatic encrypted recovery follows journal changes and pauses on another device', async ({ browser }) => {
   const first = await browser.newContext(), second = await browser.newContext();
   let envelope: unknown, writes = 0;
@@ -168,8 +243,9 @@ test('wallet uses the saved personal memory code automatically', async ({ page }
   await page.route('**/api/phone/wallet-balance', async route => { token = route.request().headers().authorization; expect(route.request().headers()['x-coinjar-memory-user']).toBe('1'); await route.fulfill({ json: { network: 'mainnet', balanceMist: '1230000000', checkedAt: '2026-11-09T04:00:00Z' } }); });
   await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000');
   await page.getByLabel('Automatically save preferences').check(); const code = await page.getByLabel('Memory access code').inputValue(); await page.getByLabel('I saved my memory code').check(); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Goal'); await page.getByLabel('Goal target in PHP').fill('500'); const date = page.getByLabel('Target date', { exact: true }); await date.fill((await date.getAttribute('min'))!); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByLabel('CoinJar access code')).toHaveCount(0);
-  await page.getByLabel('Sui public address').fill(address); await page.getByRole('button', { name: 'Check balance' }).click();
+  await page.getByLabel('Sui public address').fill(address); await page.getByRole('button', { name: 'Link wallet', exact: true }).click(); await expect(page.getByRole('button', { name: 'Check balance' })).toHaveCount(0); await page.getByRole('button', { name: 'Home' }).click(); await page.getByRole('button', { name: 'Check balance' }).click();
   await expect(page.getByText('1.23 SUI', { exact: false })).toBeVisible(); expect(token).toBe(`Bearer ${code}`);
 });
 
@@ -185,15 +261,16 @@ test('goal wallet tracks successful checks without changing savings', async ({ p
   });
   await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Emergency'); await page.getByLabel('Goal target in PHP').fill('500'); const date = page.getByLabel('Target date', { exact: true }); await date.fill((await date.getAttribute('min'))!); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByLabel('Sui public address').fill(first); await page.getByRole('button', { name: 'Link wallet', exact: true }).click(); await page.getByRole('button', { name: 'Home' }).click();
   const wallet = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Savings wallet' }) });
-  await wallet.getByLabel('Sui public address').fill(first); await wallet.getByLabel('CoinJar access code').fill('a'.repeat(43)); await wallet.getByRole('button', { name: 'Link wallet and check' }).click();
+  await wallet.getByLabel('CoinJar access code').fill('a'.repeat(43)); await wallet.getByRole('button', { name: 'Check balance' }).click();
   await expect(wallet.getByText('12.5 SUI', { exact: false })).toBeVisible(); await expect(page.getByText('₱0.00 saved of ₱500.00 · 0%')).toBeVisible();
   await wallet.getByRole('button', { name: 'Check balance' }).click(); await expect(wallet.getByText('Increased by 2 SUI', { exact: false })).toBeVisible();
   await wallet.getByRole('button', { name: 'Check balance' }).click(); await expect(wallet.getByText('Decreased by 1.5 SUI', { exact: false })).toBeVisible();
   await wallet.getByRole('button', { name: 'Check balance' }).click(); await expect(wallet.getByText('Wallet balance is unavailable.', { exact: false })).toBeVisible(); await expect(wallet.getByText('13 SUI', { exact: false })).toBeVisible();
-  await page.reload(); await expect(wallet.getByLabel('Sui public address')).toHaveValue(first); await expect(wallet.getByText('Decreased by 1.5 SUI', { exact: false })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit goal' }).click(); await page.getByLabel('Goal name').fill('Emergency fund'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await expect(wallet.getByLabel('Sui public address')).toHaveValue(first);
-  await wallet.getByLabel('Sui public address').fill(second); await wallet.getByLabel('CoinJar access code').fill('a'.repeat(43)); await wallet.getByRole('button', { name: 'Link wallet and check' }).click(); await expect(wallet.getByText('9 SUI', { exact: false })).toBeVisible(); await expect(wallet.getByText('since the previous check', { exact: false })).toHaveCount(0);
+  await page.reload(); await expect(wallet.getByText('Decreased by 1.5 SUI', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit goal' }).click(); await page.getByLabel('Goal name').fill('Emergency fund'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByLabel('Sui public address')).toHaveValue(first);
+  await page.getByLabel('Sui public address').fill(second); await page.getByRole('button', { name: 'Update linked wallet' }).click(); await page.getByRole('button', { name: 'Home' }).click(); await wallet.getByLabel('CoinJar access code').fill('a'.repeat(43)); await wallet.getByRole('button', { name: 'Check balance' }).click(); await expect(wallet.getByText('9 SUI', { exact: false })).toBeVisible(); await expect(wallet.getByText('since the previous check', { exact: false })).toHaveCount(0);
   await expect(page.getByText('₱0.00 saved of ₱500.00 · 0%')).toBeVisible(); await expect(page.locator('.simple-amount')).toHaveText('₱1,000.00');
 });
 
@@ -210,9 +287,10 @@ test('read-only Sui balance stays separate from the phone journal', async ({ pag
   await page.getByLabel('Currency').selectOption('PHP');
   await page.getByLabel('Current balance').fill('1000');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Goal'); await page.getByLabel('Goal target in PHP').fill('500'); const date = page.getByLabel('Target date', { exact: true }); await date.fill((await date.getAttribute('min'))!); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Profile' }).click();
   await page.getByLabel('Sui public address').fill(address);
-  await page.getByLabel('CoinJar access code').fill('a'.repeat(43));
+  await page.getByRole('button', { name: 'Link wallet', exact: true }).click(); await page.getByRole('button', { name: 'Home' }).click(); await page.getByLabel('CoinJar access code').fill('a'.repeat(43));
   await page.getByRole('button', { name: 'Check balance' }).click();
   await expect(page.getByText('1.23456789 SUI', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Home' }).click();
@@ -221,7 +299,7 @@ test('read-only Sui balance stays separate from the phone journal', async ({ pag
   await page.reload();
   await page.getByRole('button', { name: 'Profile' }).click();
   await expect(page.getByLabel('Sui public address')).toHaveValue(address);
-  await expect(page.getByText('1.23456789 SUI', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Check balance' })).toHaveCount(0);
 });
 
 test('phone journal saves its loop locally and restores only a valid confirmed backup', async ({ page, context, browser }) => {
@@ -407,9 +485,9 @@ test('Walrus requires consent and restores only approved preferences with a mock
   expect(remembered).toBe('');
   page.once('dialog', dialog => void dialog.accept());
   await page.getByRole('button', { name: 'Save preferences' }).click();
-  await expect(page.getByText('Saving to Walrus testnet. This may take a minute.')).toBeVisible();
+  await expect(page.getByText('Saving to Walrus mainnet. This may take a minute.')).toBeVisible();
   releaseWrite();
-  await expect(page.getByText('Testnet memory saved.')).toBeVisible();
+  await expect(page.getByText('Mainnet memory saved.', { exact: false })).toBeVisible();
   expect(remembered).not.toContain('private lunch');
   await page.getByRole('button', { name: 'Home' }).click();
   await page.getByRole('button', { name: 'Profile' }).click();

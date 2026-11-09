@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { preferenceMemory } from './phoneMemory';
 import type { PhoneJournal } from './phoneJournal';
-import { memoryHeaders, memoryStorageSuffix, personalMemoryHeaders, personalStorageSuffix, walrusNetwork } from './phoneNetwork';
+import { memoryHeaders, memoryStorageSuffix, personalHeadersFor, personalStorageSuffix, walrusNetwork } from './phoneNetwork';
 
 const CONFIG = 'coinjar.phone.walrus.auto.v1' + memoryStorageSuffix;
 const PENDING = 'coinjar.phone.walrus.pending.v1' + memoryStorageSuffix;
@@ -70,7 +70,7 @@ export function usePhoneAutoMemory(journal: PhoneJournal | null) {
       running.current = true;
       setStatus(`Saving preferences to Walrus ${config.personal ? 'mainnet' : walrusNetwork}…`);
       try {
-      const response = await fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.code}`, ...(config.personal ? personalMemoryHeaders : memoryHeaders) }, body: JSON.stringify({ consent: true, action: 'remember', memory: pending.memory, operationId: pending.operationId }) });
+      const response = await fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.code}`, ...(config.personal ? await personalHeadersFor(config.code) : memoryHeaders) }, body: JSON.stringify({ consent: true, action: 'remember', memory: pending.memory, operationId: pending.operationId }) });
         const result = await response.json();
         if (!response.ok || result.saved !== true) throw new Error('Not confirmed');
         localStorage.setItem(savedKey, pending.memory);

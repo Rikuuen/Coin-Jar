@@ -1,5 +1,5 @@
 import { validateJournal, type PhoneJournal } from './phoneJournal';
-import { mainnetDemo } from './phoneNetwork';
+import { mainnetDemo, memoryStorageSuffix, personalStorageSuffix } from './phoneNetwork';
 
 type Envelope = { version: 1; iv: string; ciphertext: string };
 const encoder = new TextEncoder();
@@ -39,7 +39,16 @@ export async function decryptJournal(code: string, envelope: Envelope) {
 }
 export async function recoveryRequest(code: string, action: 'backupSave' | 'backupRestore', envelope?: Envelope, operationId: string = crypto.randomUUID()) {
   const { token } = await keys(code);
-  const response = await fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-coinjar-memory-network': 'mainnet', 'x-coinjar-recovery': '1', ...(mainnetDemo ? { 'x-coinjar-memory-demo': '1' } : {}) }, body: JSON.stringify({ consent: true, action, ...(envelope ? { envelope, operationId } : {}) }) });
+  const namespaceKey = 'coinjar.phone.recovery.namespace.v1' + memoryStorageSuffix + await personalStorageSuffix(code);
+  const saved = localStorage.getItem(namespaceKey);
+  const legacy = saved === 'legacy' ? true : saved === 'regular' ? false : mainnetDemo;
+  const send = (demo: boolean) => fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-coinjar-memory-network': 'mainnet', 'x-coinjar-recovery': '1', ...(demo ? { 'x-coinjar-memory-demo': '1' } : {}) }, body: JSON.stringify({ consent: true, action, ...(envelope ? { envelope, operationId } : {}) }) });
+  let response = await send(legacy);
+  if (action === 'backupRestore' && response.status === 404 && saved === null) {
+    const alternative = await send(!legacy);
+    if (alternative.ok) localStorage.setItem(namespaceKey, legacy ? 'regular' : 'legacy');
+    if (alternative.status !== 404) response = alternative;
+  }
   const result = await response.json();
   if (!response.ok) throw Error(result.error || 'Recovery unavailable.');
   return result;
