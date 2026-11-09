@@ -72,3 +72,14 @@ test('restore rejects malformed, duplicate, or unsafe financial records and stri
   const restored = validateJournal({ ...j, entries: [{ ...j.entries[0], voidedAt: 'untrusted' }] });
   assert.equal(savings(restored, '2026-01-01').summary.availableCents, 400);
 });
+
+test('goal wallet survives journal validation without affecting savings', () => {
+  const j = newJournal('PHP', 100000, '2026-01-01');
+  const address = '0x' + 'a'.repeat(64);
+  j.goal = { id: 'g', title: 'Goal', targetCents: 50000, targetDate: '2026-01-10', status: 'active', createdAt: '', wallet: { address, balance: 'untrusted' } };
+  const restored = validateJournal(JSON.parse(JSON.stringify(j)));
+  assert.deepEqual(restored.goal?.wallet, { address });
+  assert.equal(savings(restored, '2026-01-01').summary.savedCents, 0);
+  assert.equal(savings(restored, '2026-01-01').summary.availableCents, 100000);
+  assert.throws(() => validateJournal({ ...j, goal: { ...j.goal, wallet: { address: 'invalid' } } }));
+});
