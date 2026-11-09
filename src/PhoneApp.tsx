@@ -205,9 +205,51 @@ export default function PhoneApp() {
         {panel === 'goal' && panelForm}
         {goal && <PhoneWallet mode="goal" code={autoMemory.config.code} personal={autoMemory.config.enabled && autoMemory.config.personal} address={walletAddress} goalId={goal.id} openProfile={() => setTab('profile')} />}
       </>}
-      {tab === 'activity' && <section className="simple-section"><h1>Recent activity</h1>{journal.entries.length ? [...journal.entries].reverse().map(entry => <div className="simple-row" key={entry.id}><div><strong>{entry.note || (entry.kind === 'income' ? 'Income' : entry.kind === 'expense' ? 'Expense' : 'Recorded saving')}</strong><small>{entry.date}</small></div><strong>{entry.kind === 'income' ? '+' : '−'}{money(entry.amountCents)}</strong></div>) : <p className="simple-empty">Your activity will appear here.</p>}</section>}
+      {tab === 'activity' && <ActivityList journal={journal} today={today} money={money} />}
       {tab === 'profile' && <><section className="simple-section phone-profile"><span className="phone-avatar large" aria-hidden="true">{(journal.nickname || 'C').slice(0, 1)}</span><div><h1>{journal.nickname || 'Your profile'}</h1><p className="simple-hint">Saving in {journal.currency} · since {journal.openingDate}</p></div>{hasBothJournals && <button className="simple-button outline" onClick={switchJournalSpace}>Switch journal</button>}</section><section className="simple-section profile-settings"><div className="phone-card-head"><h2>Memory settings</h2><span className={`phone-chip${autoMemory.config.enabled ? ' on' : ''}`}>{autoMemory.config.enabled ? 'On' : 'Off'}</span></div><p className="simple-hint">Choose how CoinJar remembers your spending patterns.</p><button className="simple-button outline" onClick={() => { setSettingsAuto(autoMemory.config.enabled); setSettingsHabits(autoMemory.config.habits); setSettingsRecent(autoMemory.config.recentHabits); setSettingsCode(autoMemory.config.code); setSettingsPersonal(autoMemory.config.personal || !autoMemory.config.enabled); setSettingsSaved(autoMemory.config.enabled); setSettingsRestoring(autoMemory.config.restorePending); setPanel('settings'); }}>Savings settings</button>{autoMemory.status && <p className="simple-hint" role="status">{autoMemory.status}</p>}{panel === 'settings' && panelForm}</section></>}<div hidden={tab !== 'profile'}><PhoneRecovery journal={journal} memoryCode={autoMemory.config.code} apply={value => save(value)} /></div>{tab === 'profile' && <><PhoneWallet mode="profile" code={autoMemory.config.code} address={walletAddress} link={linkWallet} /><details className="simple-section" open={memoryToolsOpen || autoMemory.config.restorePending} onToggle={event => setMemoryToolsOpen(event.currentTarget.open)}><summary>Memory tools</summary><PhoneWalrus journal={journal} apply={value => { const applied = save(value); if (applied && autoMemory.config.restorePending) autoMemory.finishRecovery(); return applied; }} personal={autoMemory.config.personal} savedCode={autoMemory.config.code} /></details></>}{backup}</>}
   </main></div>;
+}
+
+type Entry = PhoneJournal['entries'][number];
+const KIND_LABEL: Record<Entry['kind'], string> = { income: 'Income', expense: 'Expense', contribution: 'Recorded saving', withdrawal: 'Savings withdrawal' };
+const addsToBalance = (kind: Entry['kind']) => kind === 'income' || kind === 'withdrawal';
+const dayMs = (date: string) => Date.parse(`${date}T00:00:00Z`);
+
+function dayLabel(date: string, today: string) {
+  const diff = Math.round((dayMs(today) - dayMs(date)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(dayMs(date)));
+}
+
+function ActivityList({ journal, today, money }: { journal: PhoneJournal; today: string; money: (cents: number) => string }) {
+  const entries = [...journal.entries].reverse();
+  if (!entries.length) return <section className="simple-section phone-activity"><h1>Recent activity</h1><div className="phone-activity-empty"><EntryIcon kind="contribution" /><p className="simple-empty">Your activity will appear here. Add income, an expense or savings from Home.</p></div></section>;
+  const weekStart = dayMs(today) - 6 * 86400000;
+  const week = { income: 0, expense: 0, contribution: 0 };
+  for (const entry of entries) if (dayMs(entry.date) >= weekStart && entry.date <= today) {
+    if (entry.kind === 'withdrawal') week.contribution -= entry.amountCents; else week[entry.kind] += entry.amountCents;
+  }
+  const days = [...new Set(entries.map(entry => entry.date))].sort().reverse();
+  return <section className="simple-section phone-activity"><h1>Recent activity</h1>
+    <div className="phone-week" aria-label="Last 7 days"><p className="phone-week-title">Last 7 days</p><div className="phone-week-stats">
+      <div><small>Money in</small><strong>{money(week.income)}</strong></div>
+      <div><small>Money out</small><strong>{money(week.expense)}</strong></div>
+      <div className="saved"><small>Saved</small><strong>{money(week.contribution)}</strong></div>
+    </div></div>
+    {days.map(date => {
+      const items = entries.filter(entry => entry.date === date);
+      const net = items.reduce((sum, entry) => sum + (addsToBalance(entry.kind) ? entry.amountCents : -entry.amountCents), 0);
+      return <div className="phone-day" key={date}><div className="phone-day-head"><h2>{dayLabel(date, today)}</h2><span>{net > 0 ? '+' : net < 0 ? '−' : ''}{money(Math.abs(net))}</span></div>
+        <div className="phone-day-list">{items.map(entry => <div className={`simple-row phone-entry ${entry.kind}`} key={entry.id}><EntryIcon kind={entry.kind} /><div className="phone-entry-text"><strong>{entry.note || KIND_LABEL[entry.kind]}</strong>{entry.note && <small>{KIND_LABEL[entry.kind]}</small>}</div><strong className="phone-entry-amount">{addsToBalance(entry.kind) ? '+' : entry.kind === 'expense' ? '−' : ''}{money(entry.amountCents)}</strong></div>)}</div>
+      </div>;
+    })}
+  </section>;
+}
+
+function EntryIcon({ kind }: { kind: Entry['kind'] }) {
+  const path = addsToBalance(kind) ?'M17 7 7 17M7 9v8h8' : kind === 'expense' ? 'M7 17 17 7M9 7h8v8' : 'M6 9h12v9a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2zM8 9V6h8v3M12 12v5';
+  return <span className={`phone-entry-icon ${kind}`} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={path} /></svg></span>;
 }
 
 function StepBadge({ n, done }: { n: number; done: boolean }) {

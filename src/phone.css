@@ -149,6 +149,36 @@
 .phone-more summary { color: var(--ink); font-size: 13px; font-weight: 700; cursor: pointer; }
 .phone-more .simple-hint { margin-top: 8px; }
 
+/* Activity */
+.phone-app .phone-activity { padding: 0; background: none; border-radius: 0; }
+.phone-app .simple-section.phone-activity > h1 { margin: 4px 0 16px; font-size: 28px; font-weight: 700; letter-spacing: -.04em; }
+.phone-week { margin-bottom: 22px; padding: 20px; border-radius: var(--radius-hero); background: var(--ink); color: #fff; }
+.phone-week-title { margin: 0 0 14px; color: rgba(255, 255, 255, .6); font-size: 13px; font-weight: 600; }
+.phone-week-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.phone-week-stats div { min-width: 0; }
+.phone-week-stats small { display: block; color: rgba(255, 255, 255, .6); font-size: 12px; font-weight: 600; }
+.phone-week-stats strong { display: block; margin-top: 4px; font-size: 16px; font-weight: 700; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.phone-week-stats .saved strong { color: var(--green); }
+.phone-day { margin-bottom: 18px; }
+.phone-day-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px 8px; }
+.phone-app .phone-day-head h2 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 700; }
+.phone-day-head span { color: var(--muted); font-size: 13px; font-weight: 600; }
+.phone-app .phone-entry { justify-content: flex-start; gap: 14px; padding: 14px 16px; border: 0; background: var(--card); }
+.phone-day-list { overflow: hidden; border-radius: 20px; }
+.phone-app .phone-entry + .phone-entry { box-shadow: inset 0 1px 0 var(--line); }
+.phone-entry-icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #fff; color: var(--ink); }
+.phone-entry-icon svg { width: 18px; height: 18px; }
+.phone-entry-icon.income { background: var(--green-soft); color: var(--green-ink); }
+.phone-entry-icon.contribution { background: var(--ink); color: var(--green); }
+.phone-entry-text { flex: 1; min-width: 0; }
+.phone-entry-text strong { display: block; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-app .phone-entry-text small { margin-top: 2px; color: var(--muted); font-size: 12px; }
+.phone-entry-amount { flex: none; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.phone-entry.income .phone-entry-amount, .phone-entry.contribution .phone-entry-amount { color: var(--green-ink); }
+.phone-activity-empty { display: grid; justify-items: center; gap: 4px; padding: 40px 24px; border-radius: var(--radius-card); background: var(--card); text-align: center; }
+.phone-activity-empty .phone-entry-icon { width: 56px; height: 56px; }
+.phone-activity-empty .simple-empty { max-width: 260px; }
+
 /* Setup: guided steps */
 .phone-setup { padding: 8px 0 0; }
 .phone-setup-progress { display: flex; gap: 6px; margin-bottom: 28px; }
