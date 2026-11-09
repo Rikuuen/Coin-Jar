@@ -52,7 +52,7 @@ export default function PhoneApp() {
   const tomorrowDate = nextDay(today);
   const tomorrow = journal ? savings({ ...journal, entries: journal.entries.filter(entry => entry.date <= today), adjustments: journal.adjustments.filter(item => item.date <= today) }, tomorrowDate, habit.remembered ? parseDailyHabitMemory(dailyHabitMemory(habit.remembered), tomorrowDate)?.days ?? [] : [], Boolean(recent.remembered && parseSpikeMemory(spikeMemory(recent.remembered), tomorrowDate))) : null;
   const money = (cents: number) => formatMoney(cents, journal?.currency ?? 'PHP');
-  const habitStatuses = [...new Set([habit.status, recent.status].filter(Boolean))];
+  const habitStatuses = [...new Set([habit.status, recent.status].filter(status => status && status !== 'Still learning: more recorded expenses are needed.'))];
   const walletAddress = journal?.walletAddress ?? journal?.goal?.wallet?.address;
   const goal = journal?.goal ?? null;
   const savedToday = journal?.entries.filter(entry => entry.kind === 'contribution' && entry.date === today).reduce((total, entry) => total + entry.amountCents, 0) ?? 0;
@@ -192,11 +192,10 @@ export default function PhoneApp() {
         {!hasRecoveryKey() && <section className="simple-section phone-banner"><p>Set up a recovery key to automatically back up your journal.</p><button className="simple-button outline" onClick={() => setTab('profile')}>Set up recovery</button></section>}
         {autoMemory.config.restorePending && <p className="simple-hint" role="status">Review your saved preferences in Profile before syncing.</p>}
         <section className="simple-section phone-hero">
-          <div className="phone-hero-top"><h2>Total saved</h2>{goal && <ProgressRing value={progress} />}</div><p className="simple-jar-amount phone-hero-amount">{money(summary!.summary.savedCents)}</p>{goal && <p className="simple-hint">of {money(goal.targetCents)} goal</p>}
           <div className="phone-today"><h3>Daily savings suggestion</h3>{!goal ? <p className="simple-hint">Create a goal to see your daily suggestion.</p> : savedToday > 0 ? <p className="phone-today-value">You saved {money(savedToday)} today</p> : <p className="phone-today-value">Today: {money(summary!.recommendation.amountCents)}</p>}</div>
           {summary!.recommendation.reasons.filter(reason => reason.includes('short of the remaining goal') || reason.startsWith('The target date') || reason.startsWith('Your target date') || reason.startsWith('Add a target date') || reason === 'Your goal has been reached.').map(reason => <p key={reason} className="simple-hint">{reason}</p>)}
           <button className="simple-button phone-save-button" onClick={() => setPanel('contribution')}>Add savings</button>
-          {goal && <><div className="phone-tomorrow"><div><h3>Tomorrow’s estimate</h3><button type="button" className="phone-explain-button" onClick={() => explanation.current?.showModal()}>How is this calculated?</button></div><p className="phone-tomorrow-amount">Around {money(tomorrow!.recommendation.amountCents)}</p></div><dialog ref={explanation} className="phone-explanation" aria-labelledby="explanation-title"><h2 id="explanation-title">Tomorrow’s estimate</h2><p>Based on your goal, time remaining, recorded balance and available spending patterns. It can change when you add an entry.</p>{tomorrow!.recommendation.reasons.map(reason => <p key={reason}>{reason}</p>)}<form method="dialog"><button className="simple-button primary">Close</button></form></dialog></>}
+          {goal && <><div className="phone-tomorrow"><p className="phone-tomorrow-amount">Tomorrow, consider saving around <strong>{money(tomorrow!.recommendation.amountCents)}</strong>.</p><button type="button" className="phone-explain-button" onClick={() => explanation.current?.showModal()}>How is this calculated?</button></div><dialog ref={explanation} className="phone-explanation" aria-labelledby="explanation-title"><h2 id="explanation-title">Tomorrow’s estimate</h2><p>Based on your goal, time remaining, recorded balance and available spending patterns. It can change when you add an entry.</p>{tomorrow!.recommendation.reasons.map(reason => <p key={reason}>{reason}</p>)}<form method="dialog"><button className="simple-button primary">Close</button></form></dialog></>}
           {Boolean(habit.remembered?.days.length) && <p className="simple-hint">Walrus remembers your spending patterns across the week.</p>}{recent.remembered && <p className="simple-hint">Walrus remembers a recent spending increase.</p>}{habitStatuses.map(status => <p key={status} className="simple-hint" role="status">{status}</p>)}
         </section>
         {panel === 'contribution' && panelForm}
@@ -255,11 +254,6 @@ function EntryIcon({ kind }: { kind: Entry['kind'] }) {
 
 function StepBadge({ n, done }: { n: number; done: boolean }) {
   return <span className="phone-step-badge" aria-hidden="true">{done ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg> : n}</span>;
-}
-
-function ProgressRing({ value }: { value: number }) {
-  const r = 30, c = 2 * Math.PI * r, pct = Math.round(value * 100);
-  return <div className="phone-ring" role="img" aria-label={`Goal ${pct}% saved`}><svg viewBox="0 0 68 68" aria-hidden="true"><circle className="track" cx="34" cy="34" r={r} /><circle className="value" cx="34" cy="34" r={r} strokeDasharray={c} strokeDashoffset={c * (1 - value)} /></svg><span aria-hidden="true">{pct}%</span></div>;
 }
 
 function NavIcon({ name }: { name: 'home' | 'activity' | 'profile' }) {
