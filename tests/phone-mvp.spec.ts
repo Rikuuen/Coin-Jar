@@ -508,54 +508,30 @@ test('savings settings opens in view on a phone', async ({ page }) => {
   await expect.poll(() => page.getByRole('heading', { name: 'Savings settings' }).evaluate(el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })).toBe(true);
 });
 
-test('Walrus requires consent and restores only approved preferences with a mock provider', async ({ page }) => {
-  let remembered = '';
-  let releaseWrite!: () => void;
-  const writeReady = new Promise<void>(resolve => { releaseWrite = resolve; });
+test('restore preferences requests a code only when needed and asks for consent', async ({ page }) => {
+  let recalls = 0;
+  const memory = 'COINJAR_PHONE_PREFERENCES_V2 ' + JSON.stringify({ currency: 'PHP', origin: 'manual' });
   await page.route('**/api/phone/walrus', async route => {
-    const body = route.request().postDataJSON();
-    if (body.action === 'remember') { remembered = body.memory; await writeReady; await route.fulfill({ json: { saved: true } }); }
-    else await route.fulfill({ json: { memories: [remembered] } });
+    expect(route.request().headers()['x-coinjar-memory-user']).toBe('1');
+    expect(route.request().postDataJSON().action).toBe('recall');
+    recalls++;
+    await route.fulfill({ json: { memories: [memory] } });
   });
-  await page.setViewportSize({ width: 412, height: 915 });
   await page.goto('/');
-  await page.getByLabel('Nickname').fill('Ari');
-  await page.getByLabel('Currency').selectOption('PHP');
-  await page.getByLabel('Current balance').fill('1000');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Add expense' }).click();
-  await page.getByLabel('Amount in PHP').fill('10');
-  await page.getByLabel('Note (optional)').fill('private lunch');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('10'); await page.getByLabel('Note (optional)').fill('private lunch'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Profile' }).click();
-  if (!(await page.getByRole('button', { name: 'Find preferences' }).isVisible())) await page.getByText('Memory tools').click();
-  await page.getByLabel('Access code', { exact: true }).fill('a'.repeat(43));
-  page.once('dialog', dialog => void dialog.dismiss());
-  await page.getByRole('button', { name: 'Save preferences' }).click();
-  expect(remembered).toBe('');
-  page.once('dialog', dialog => void dialog.accept());
-  await page.getByRole('button', { name: 'Save preferences' }).click();
-  await expect(page.getByText('Saving to Walrus mainnet. This may take a minute.')).toBeVisible();
-  releaseWrite();
-  await expect(page.getByText('Mainnet memory saved.', { exact: false })).toBeVisible();
-  expect(remembered).not.toContain('private lunch');
-  await page.getByRole('button', { name: 'Home' }).click();
-  await page.getByRole('button', { name: 'Profile' }).click();
-  await page.getByRole('button', { name: 'Savings settings' }).click();
-  await expect(page.getByLabel('Minimum cash buffer')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('button', { name: 'Profile' }).click();
-  if (!(await page.getByRole('button', { name: 'Find preferences' }).isVisible())) await page.getByText('Memory tools').click();
-  await page.getByLabel('Access code', { exact: true }).fill('a'.repeat(43));
-  page.once('dialog', dialog => void dialog.accept());
-  await page.getByRole('button', { name: 'Find preferences' }).click();
-  page.once('dialog', dialog => void dialog.accept());
-  await page.getByRole('button', { name: 'Review memory 1' }).click();
+  await expect(page.getByRole('button', { name: 'Save preferences' })).toHaveCount(0);
+  await expect(page.getByLabel('Memory code', { exact: true })).not.toBeVisible();
+  await page.getByText('Restore preferences', { exact: true }).click();
+  await page.getByLabel('Memory code', { exact: true }).fill('a'.repeat(43));
+  page.once('dialog', dialog => void dialog.dismiss()); await page.getByRole('button', { name: 'Find preferences' }).click(); expect(recalls).toBe(0);
+  page.once('dialog', dialog => void dialog.accept()); await page.getByRole('button', { name: 'Find preferences' }).click();
+  await expect(page.getByRole('button', { name: 'Review memory 1' })).toBeVisible();
+  page.once('dialog', dialog => void dialog.accept()); await page.getByRole('button', { name: 'Review memory 1' }).click();
   await expect(page.getByText('Saved preferences applied on this device.')).toBeVisible();
-  await page.getByRole('button', { name: 'Home' }).click();
-  await expect(page.locator('.simple-amount')).toHaveText('₱990.00');
-  await page.getByRole('button', { name: 'Activity' }).click();
-  await expect(page.getByText('private lunch')).toBeVisible();
+  await page.getByRole('button', { name: 'Home' }).click(); await expect(page.locator('.simple-amount')).toHaveText('₱990.00');
+  await page.getByRole('button', { name: 'Activity' }).click(); await expect(page.getByText('private lunch')).toBeVisible();
 });
 
 test('automatic Walrus preferences opt in on onboarding and retry the same pending write after reload', async ({ page }) => {

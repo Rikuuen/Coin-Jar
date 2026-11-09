@@ -1,33 +1,33 @@
 import React, { useState } from 'react';
-import { applyPreferenceMemory, preferenceMemory } from './phoneMemory';
+import { applyPreferenceMemory } from './phoneMemory';
 import type { PhoneJournal } from './phoneJournal';
 import { memoryHeaders, personalHeadersFor, rememberAlternateNamespace, walrusNetwork } from './phoneNetwork';
 
 export default function PhoneWalrus({ journal, apply, personal = false, savedCode = '' }: { journal: PhoneJournal; apply: (value: PhoneJournal) => boolean; personal?: boolean; savedCode?: string }) {
-  const network = personal ? 'mainnet' : walrusNetwork;
-  const [code, setCode] = useState(personal ? savedCode : '');
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [memories, setMemories] = useState<string[]>([]);
-  async function request(action: 'remember' | 'recall') {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(code)) { setMessage('Enter the 43-character access code.'); return; }
-    const warning = action === 'remember' ? `Send your currency preference to Walrus ${network}? The Walrus service can read these preferences.` : `Retrieve your saved ${network} preferences from Walrus?`;
-    if (!window.confirm(warning)) return;
-    setBusy(true); setMessage(action === 'remember' ? `Saving to Walrus ${network}. This may take a minute.` : 'Looking for saved preferences.');
+  const accessCode = savedCode || code.trim();
+  const personalRecovery = personal || !savedCode;
+  const network = personalRecovery ? 'mainnet' : walrusNetwork;
+  async function recall() {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(accessCode)) { setMessage('Enter your 43-character memory code.'); return; }
+    if (!window.confirm(`Retrieve your saved ${network} preferences from Walrus?`)) return;
+    setBusy(true); setMessage('Looking for saved preferences.');
     try {
-      const send = async (alternate = false) => fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${code}`, ...(personal ? await personalHeadersFor(code, alternate) : memoryHeaders) }, body: JSON.stringify({ consent: true, action, ...(action === 'remember' ? { memory: preferenceMemory(journal), operationId: crypto.randomUUID() } : {}) }) });
+      const send = async (alternate = false) => fetch('/api/phone/walrus', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${accessCode}`, ...(personalRecovery ? await personalHeadersFor(accessCode, alternate) : memoryHeaders) }, body: JSON.stringify({ consent: true, action: 'recall' }) });
       const response = await send();
       let result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Walrus is unavailable.');
-      if (action === 'recall' && personal && Array.isArray(result.memories) && result.memories.length === 0) {
+      if (personalRecovery && Array.isArray(result.memories) && result.memories.length === 0) {
         const alternative = await send(true);
         if (!alternative.ok) throw new Error('Walrus is unavailable.');
         const found = await alternative.json();
-        if (Array.isArray(found.memories) && found.memories.length) { await rememberAlternateNamespace(code); result = found; }
+        if (Array.isArray(found.memories) && found.memories.length) { await rememberAlternateNamespace(accessCode); result = found; }
       }
-      if (action === 'remember') setMessage(`${network === 'mainnet' ? 'Mainnet' : 'Testnet'} memory saved. Your journal remains on this device.`);
-      else { setMemories(result.memories); setMessage(result.memories.length ? 'Choose a memory to review and apply.' : 'No compatible memories were found.'); }
-    } catch { setMessage(action === 'remember' ? 'Could not confirm the write. Check Walrus before retrying.' : 'Could not retrieve memories. Check the connection and access code.'); }
+      setMemories(result.memories); setMessage(result.memories.length ? 'Choose a memory to review and apply.' : 'No compatible memories were found.');
+    } catch { setMessage('Could not retrieve memories. Check the connection and memory code.'); }
     finally { setBusy(false); }
   }
   function restore(memory: string) {
@@ -37,5 +37,5 @@ export default function PhoneWalrus({ journal, apply, personal = false, savedCod
       if (apply(value)) setMessage('Saved preferences applied on this device.');
     } catch { setMessage('This memory is invalid or uses a different currency.'); }
   }
-  return <section className="simple-section"><h2>Walrus {network}</h2><p className="simple-hint">Use your memory code to find or save preferences. Journal recovery is handled separately.</p><label>Access code<input type="password" autoComplete="off" value={code} onChange={event => setCode(event.target.value)} /></label><div className="simple-actions"><button className="simple-button outline" disabled={busy} onClick={() => void request('remember')}>Save preferences</button><button className="simple-button outline" disabled={busy} onClick={() => void request('recall')}>Find preferences</button></div>{message && <p role="status" className="simple-hint">{message}</p>}{memories.map((memory, index) => <button key={`${index}-${memory}`} className="simple-link" onClick={() => restore(memory)}>Review memory {index + 1}</button>)}</section>;
+  return <section className="simple-section"><p className="simple-hint">Find your saved preferences. To restore your journal, use Journal recovery.</p>{!savedCode && <label>Memory code<input type="password" autoComplete="off" value={code} onChange={event => { setCode(event.target.value); setMemories([]); setMessage(''); }} /></label>}<button type="button" className="simple-button outline" disabled={busy} onClick={() => void recall()}>Find preferences</button>{message && <p role="status" className="simple-hint">{message}</p>}{memories.map((memory, index) => <button key={`${index}-${memory}`} className="simple-link" onClick={() => restore(memory)}>Review memory {index + 1}</button>)}</section>;
 }
