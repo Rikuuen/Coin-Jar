@@ -192,11 +192,9 @@ export default function PhoneApp() {
         {!hasRecoveryKey() && <section className="simple-section phone-banner"><p>Set up a recovery key to automatically back up your journal.</p><button className="simple-button outline" onClick={() => setTab('profile')}>Set up recovery</button></section>}
         {autoMemory.config.restorePending && <p className="simple-hint" role="status">Review your saved preferences in Profile before syncing.</p>}
         <section className="simple-section phone-hero">
-          <div className="phone-today"><h3>Daily savings suggestion</h3>{!goal ? <p className="simple-hint">Create a goal to see your daily suggestion.</p> : savedToday > 0 ? <p className="phone-today-value">You saved {money(savedToday)} today</p> : <p className="phone-today-value">Today: {money(summary!.recommendation.amountCents)}</p>}</div>
-          {summary!.recommendation.reasons.filter(reason => reason.includes('short of the remaining goal') || reason.startsWith('The target date') || reason.startsWith('Your target date') || reason.startsWith('Add a target date') || reason === 'Your goal has been reached.').map(reason => <p key={reason} className="simple-hint">{reason}</p>)}
+          <div className="phone-today"><h3>Daily savings suggestion</h3>{!goal ? <p className="simple-hint">Create a goal to see your daily suggestion.</p> : savedToday > 0 ? <p className="phone-today-value">You saved {money(savedToday)} today!</p> : !summary!.summary.remainingCents ? <p className="phone-today-value">Goal reached!</p> : summary!.recommendation.amountCents === 0 ? <p className="phone-today-value">No savings suggested today</p> : <p className="phone-today-value">Save {money(summary!.recommendation.amountCents)} today!</p>}</div>
           <button className="simple-button phone-save-button" onClick={() => setPanel('contribution')}>Add savings</button>
-          {goal && <><div className="phone-tomorrow"><p className="phone-tomorrow-amount">Tomorrow, consider saving around <strong>{money(tomorrow!.recommendation.amountCents)}</strong>.</p><button type="button" className="phone-explain-button" onClick={() => explanation.current?.showModal()}>How is this calculated?</button></div><dialog ref={explanation} className="phone-explanation" aria-labelledby="explanation-title"><h2 id="explanation-title">Tomorrow’s estimate</h2><p>Based on your goal, time remaining, recorded balance and available spending patterns. It can change when you add an entry.</p>{tomorrow!.recommendation.reasons.map(reason => <p key={reason}>{reason}</p>)}<form method="dialog"><button className="simple-button primary">Close</button></form></dialog></>}
-          {Boolean(habit.remembered?.days.length) && <p className="simple-hint">Walrus remembers your spending patterns across the week.</p>}{recent.remembered && <p className="simple-hint">Walrus remembers a recent spending increase.</p>}{habitStatuses.map(status => <p key={status} className="simple-hint" role="status">{status}</p>)}
+          {goal && <><div className="phone-tomorrow"><p className="phone-tomorrow-amount">Tomorrow, consider saving around <strong>{money(tomorrow!.recommendation.amountCents)}</strong>.</p><button type="button" className="phone-explain-button" onClick={() => explanation.current?.showModal()}>How is this calculated?</button></div><dialog ref={explanation} className="phone-explanation" aria-labelledby="explanation-title"><h2 id="explanation-title">Savings insights</h2><p>Suggestions use your goal, time remaining, recorded balance and available spending patterns. They can change when you add an entry.</p><h3>Today</h3>{summary!.recommendation.reasons.map(reason => <p key={reason}>{reason}</p>)}<h3>Tomorrow</h3>{tomorrow!.recommendation.reasons.map(reason => <p key={reason}>{reason}</p>)}{Boolean(habit.remembered?.days.length) && <p>Walrus remembers your spending patterns across the week.</p>}{recent.remembered && <p>Walrus remembers a recent spending increase.</p>}{habitStatuses.map(status => <p key={status} role="status">{status}</p>)}<form method="dialog"><button className="simple-button primary">Close</button></form></dialog></>}
         </section>
         {panel === 'contribution' && panelForm}
         <section className="simple-balance phone-card"><div className="simple-label-row"><h1>Balance</h1><button className="simple-link" onClick={() => setPanel('balance')}>Update balance</button></div><p className="simple-amount">{money(summary!.summary.availableCents)}</p><div className="simple-actions"><button className="simple-button primary" onClick={() => setPanel('expense')}>Add expense</button><button className="simple-button outline" onClick={() => setPanel('income')}>Add income</button></div></section>
@@ -219,7 +217,12 @@ function dayLabel(date: string, today: string) {
   const diff = Math.round((dayMs(today) - dayMs(date)) / 86400000);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Yesterday';
-  return new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(dayMs(date)));
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(new Date(dayMs(date)));
+}
+
+function entryRecordedAt(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value) || !Number.isFinite(Date.parse(value))) return 'Recorded time unavailable';
+  return `Recorded ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))}`;
 }
 
 function ActivityList({ journal, today, money }: { journal: PhoneJournal; today: string; money: (cents: number) => string }) {
@@ -239,9 +242,8 @@ function ActivityList({ journal, today, money }: { journal: PhoneJournal; today:
     </div></div>
     {days.map(date => {
       const items = entries.filter(entry => entry.date === date);
-      const net = items.reduce((sum, entry) => sum + (addsToBalance(entry.kind) ? entry.amountCents : -entry.amountCents), 0);
-      return <div className="phone-day" key={date}><div className="phone-day-head"><h2>{dayLabel(date, today)}</h2><span>{net > 0 ? '+' : net < 0 ? '−' : ''}{money(Math.abs(net))}</span></div>
-        <div className="phone-day-list">{items.map(entry => <div className={`simple-row phone-entry ${entry.kind}`} key={entry.id}><EntryIcon kind={entry.kind} /><div className="phone-entry-text"><strong>{entry.note || KIND_LABEL[entry.kind]}</strong>{entry.note && <small>{KIND_LABEL[entry.kind]}</small>}</div><strong className="phone-entry-amount">{addsToBalance(entry.kind) ? '+' : entry.kind === 'expense' ? '−' : ''}{money(entry.amountCents)}</strong></div>)}</div>
+      return <div className="phone-day" key={date}><div className="phone-day-head"><h2>{dayLabel(date, today)}</h2><span>{new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(dayMs(date)))}</span></div>
+        <div className="phone-day-list">{items.map(entry => <div className={`simple-row phone-entry ${entry.kind}`} key={entry.id}><EntryIcon kind={entry.kind} /><div className="phone-entry-text"><strong>{entry.note || KIND_LABEL[entry.kind]}</strong>{entry.note && <small>{KIND_LABEL[entry.kind]}</small>}<small>{entryRecordedAt(entry.createdAt)}</small></div><strong className="phone-entry-amount">{addsToBalance(entry.kind) ? '+' : entry.kind === 'expense' ? '−' : ''}{money(entry.amountCents)}</strong></div>)}</div>
       </div>;
     })}
   </section>;

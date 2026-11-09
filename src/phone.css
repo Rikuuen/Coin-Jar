@@ -61,7 +61,7 @@
 .phone-app .phone-hero h3 { margin: 6px 0 0; color: #fff; font: 700 15px 'DM Sans', sans-serif; }
 .phone-app .phone-hero .simple-hint { color: rgba(255, 255, 255, .62); }
 .phone-app .phone-today h3 { margin: 0; color: rgba(255, 255, 255, .8); font-size: 14px; }
-.phone-today-value { margin: 7px 0 0; color: #fff; font-size: 20px; font-weight: 700; }
+.phone-today-value { margin: 10px 0 0; color: var(--green); font-size: clamp(28px, 8vw, 38px); font-weight: 700; line-height: 1.12; overflow-wrap: anywhere; }
 .phone-app .phone-hero .phone-save-button { width: 100%; margin-top: 20px; }
 .phone-tomorrow { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, .12); }
 .phone-tomorrow-amount { margin: 0; color: #fff; font: 400 15px/1.5 'DM Sans', sans-serif; overflow-wrap: anywhere; }
@@ -69,6 +69,7 @@
 .phone-explanation { width: min(90vw, 420px); max-height: 80vh; padding: 24px; border: 0; border-radius: 16px; color: var(--ink); background: #fff; }
 .phone-explanation::backdrop { background: rgba(0, 0, 0, .6); }
 .phone-app .phone-hero .phone-explanation h2 { color: var(--ink); font: 700 20px 'DM Sans', sans-serif; }
+.phone-app .phone-hero .phone-explanation h3 { color: var(--ink); }
 .phone-explanation p { font-size: 14px; line-height: 1.5; }
 
 /* Balance card */
