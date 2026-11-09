@@ -251,7 +251,7 @@ test('mainnet demo applies a recalled fictional spending pattern with a mock pro
   await page.goto('/?walrus=mainnet-demo');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
   await page.getByRole('button', { name: 'Home' }).click();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
   await page.getByRole('button', { name: 'Profile' }).click();
   await page.getByRole('button', { name: 'Savings settings' }).click();
   await page.getByLabel('Automatically save preferences').check();
@@ -260,7 +260,7 @@ test('mainnet demo applies a recalled fictional spending pattern with a mock pro
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByText('Walrus remembers a recent spending increase', { exact: false })).toBeVisible();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
 });
 
 test('wallet uses the saved personal memory code automatically', async ({ page }) => {
@@ -424,11 +424,13 @@ test('goal coach reserves estimated spending only when needed', async ({ page })
   const journal = { version: 1, currency: 'PHP', openingCents: 123000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: dates.map((date, i) => ({ id: `e${i}`, kind: 'expense', amountCents: [10000, 20000, 30000, 1000, 1000, 1000][i], date, note: '', createdAt: '' })), adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-02-05', status: 'active', createdAt: '' } };
   await page.addInitScript(j => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify(j)), journal); await page.goto('/');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱400.00');
-  await expect(section.getByText('Estimated spending still to come: ₱200.00', { exact: false }).first()).toBeVisible();
+  await expect(section.locator('.phone-today-value')).toHaveText('Today: ₱400.00');
   await expect(section.getByText('short of the remaining goal', { exact: false }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'How is this calculated?' }).click();
+  await expect(page.getByRole('dialog')).toContainText('It can change when you add an entry');
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Add income' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱500.00');
+  await expect(section.locator('.phone-today-value')).toHaveText('Today: ₱500.00');
 });
 
 test('new goals require a target date', async ({ page }) => {
@@ -446,13 +448,13 @@ test('goal coach recalculates after different daily savings', async ({ page }) =
   await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('10000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Goal'); await page.getByLabel('Goal target in PHP').fill('5000'); await page.getByLabel('Target date', { exact: true }).fill('2026-01-10'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱500.00');
+  await expect(section.locator('.phone-today-value')).toHaveText('Today: ₱500.00');
   await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱0.00'); await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱522.23');
+  await expect(section.locator('.phone-hero-amount')).toHaveText('₱300.00'); await expect(section.locator('.phone-today-value')).toHaveText('You saved ₱300.00 today'); await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱522.23');
   await page.clock.setFixedTime(new Date('2026-01-02T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('500'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.clock.setFixedTime(new Date('2026-01-03T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('200'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱0.00'); await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱571.43');
-  await page.reload(); await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱571.43');
+  await expect(section.locator('.phone-hero-amount')).toHaveText('₱1,000.00'); await expect(section.locator('.phone-today-value')).toHaveText('You saved ₱200.00 today'); await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱571.43');
+  await page.reload(); await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱571.43');
   await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Savings settings' }).click();
   await expect(page.getByLabel('Minimum cash buffer')).toHaveCount(0); await expect(page.getByLabel('Daily savings limit')).toHaveCount(0);
 });
@@ -466,8 +468,9 @@ test('today and tomorrow stay distinct and learning appears once', async ({ page
   await page.route('**/api/phone/walrus', async route => await route.fulfill({ json: route.request().postDataJSON().action === 'recallHabit' ? { memories: [] } : { saved: true } }));
   await page.goto('/');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱0.00');
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱950.00');
+  await expect(section.locator('.phone-hero-amount')).toHaveText('₱50.00');
+  await expect(section.locator('.phone-today-value')).toHaveText('You saved ₱50.00 today');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱950.00');
   await expect(page.getByText('Still learning: more recorded expenses are needed.')).toHaveCount(1);
 });
 
@@ -666,7 +669,7 @@ test('a separately approved recalled habit changes the next-day estimate and can
   await page.goto('/');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
   await page.getByRole('button', { name: 'Home' }).click();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
   expect(recalls).toBe(0);
   await page.getByRole('button', { name: 'Profile' }).click();
   await page.getByRole('button', { name: 'Savings settings' }).click();
@@ -677,7 +680,7 @@ test('a separately approved recalled habit changes the next-day estimate and can
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByText('Using an approved spending pattern recalled from Walrus mainnet.')).toBeVisible();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByText('Walrus remembers your spending patterns across the week', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Profile' }).click();
@@ -685,7 +688,7 @@ test('a separately approved recalled habit changes the next-day estimate and can
   await page.getByLabel('Remember spending patterns').uncheck();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Home' }).click();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByText('Walrus remembers your spending patterns across the week', { exact: false })).toHaveCount(0);
 });
@@ -724,7 +727,7 @@ test('unavailable Walrus habits leave tomorrow’s estimate based on local data'
   await expect(page.getByText('Walrus habits unavailable.', { exact: false })).toBeVisible();
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
   await page.getByRole('button', { name: 'Home' }).click();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByText('Walrus remembers your spending patterns across the week', { exact: false })).toHaveCount(0);
 });
@@ -740,7 +743,7 @@ test('recent-spending memories require separate consent and adjust tomorrow with
   await page.goto('/');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tomorrow’s estimate' }) });
   await page.getByRole('button', { name: 'Home' }).click();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
   expect(recalls).toBe(0);
   await page.getByRole('button', { name: 'Profile' }).click();
   await page.getByRole('button', { name: 'Savings settings' }).click();
@@ -751,15 +754,15 @@ test('recent-spending memories require separate consent and adjust tomorrow with
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByText('Walrus remembers a recent spending increase', { exact: false })).toBeVisible();
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱90.91');
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
+  await expect(section.locator('.phone-today-value')).toHaveText('Today: ₱90.91');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
   await page.getByRole('button', { name: 'Profile' }).click();
   await page.getByRole('button', { name: 'Savings settings' }).click();
   await page.getByLabel('Remember spending patterns').uncheck();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Home' }).click();
-  await expect(section.locator('.simple-jar-amount').last()).toHaveText('₱100.00');
-  await expect(section.locator('.simple-jar-amount').first()).toHaveText('₱90.91');
+  await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Around ₱100.00');
+  await expect(section.locator('.phone-today-value')).toHaveText('Today: ₱90.91');
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByText('Walrus remembers a recent spending increase', { exact: false })).toHaveCount(0);
 });
