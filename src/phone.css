@@ -117,6 +117,38 @@
 .phone-app .phone-nav button[aria-current="page"] { color: var(--ink); }
 .phone-app .phone-nav button[aria-current="page"] svg { color: var(--ink); }
 
+/* Shared inputs and buttons inside cards */
+.phone-app .simple-section label:not(.simple-check):not(.simple-file-label) { display: block; margin-top: 16px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.phone-app .simple-section input:not([type=checkbox]):not([type=file]),
+.phone-app .simple-section select { display: block; width: 100%; min-height: 50px; margin-top: 6px; padding: 12px 14px; border: 1px solid rgba(0, 0, 0, .12); border-radius: 14px; background: #fff; color: var(--ink); font: 500 15px 'DM Sans', sans-serif; }
+.phone-app .simple-section input:focus, .phone-app .simple-section select:focus { outline: none; border-color: var(--ink); }
+.phone-app .simple-section .simple-actions { margin-top: 12px; }
+.phone-app .simple-section > .simple-button { width: 100%; max-width: none; margin-top: 12px; }
+.phone-app .simple-section .simple-check { margin-top: 12px; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.phone-app .simple-check input { accent-color: var(--green); }
+.phone-app .simple-button:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+.phone-app .simple-section .simple-form { margin: 16px 0 0; padding: 0; background: none; border-radius: 0; box-shadow: none; }
+.phone-app .simple-section .simple-form label { margin-top: 0; }
+.phone-app .simple-section .simple-form form, .phone-app .simple-section form.simple-form { display: grid; gap: 12px; }
+
+/* Card header with status chip */
+.phone-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.phone-app .phone-card-head h2 { margin: 0; font-size: 17px; font-weight: 700; }
+.phone-chip { flex: none; padding: 5px 11px; border-radius: 999px; background: rgba(0, 0, 0, .06); color: var(--ink-2); font-size: 12px; font-weight: 700; }
+.phone-chip.on { background: var(--green-soft); color: var(--green-ink); }
+
+/* Profile */
+.phone-app .phone-profile { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.phone-app .phone-profile h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -.03em; }
+.phone-app .phone-profile .simple-hint { margin-top: 2px; }
+.phone-app .phone-profile .simple-button { width: 100%; margin: 0; }
+.phone-avatar.large { width: 60px; height: 60px; background: var(--ink); color: var(--green); font-size: 24px; }
+.phone-warning { margin: 14px 0 0; padding: 12px 14px; border-radius: 14px; background: #fff8e8; color: #6b4a00; font-size: 13px; line-height: 1.45; }
+.phone-status { margin: 14px 0 0; padding: 10px 14px; border-radius: 14px; background: #fff; color: var(--ink-2); font-size: 13px; }
+.phone-more { margin-top: 16px; }
+.phone-more summary { color: var(--ink); font-size: 13px; font-weight: 700; cursor: pointer; }
+.phone-more .simple-hint { margin-top: 8px; }
+
 /* Setup: guided steps */
 .phone-setup { padding: 8px 0 0; }
 .phone-setup-progress { display: flex; gap: 6px; margin-bottom: 28px; }
