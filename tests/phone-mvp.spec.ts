@@ -13,10 +13,13 @@ test('automatic encrypted recovery follows journal changes and pauses on another
   await first.route('**/api/phone/walrus', handle); await second.route('**/api/phone/walrus', handle);
   const page = await first.newPage(); await page.goto('/?walrus=mainnet-demo');
   await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Set up recovery' })).toBeVisible();
   await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click();
   const key = await page.getByLabel('Recovery key', { exact: true }).inputValue();
-  await page.getByLabel('I saved my recovery key').check(); await page.getByLabel('Automatically back up journal').check();
+  await page.getByRole('button', { name: 'I saved my recovery key' }).click();
   await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
+  await page.evaluate(() => localStorage.removeItem('coinjar.phone.recovery.key.v1.demo.automatic'));
+  await page.reload(); await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
   await page.getByRole('button', { name: 'Home' }).click(); await page.getByRole('button', { name: 'Add expense' }).click();
   await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Private fictional lunch'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => writes).toBe(2); expect(JSON.stringify(envelope)).not.toContain('Private fictional lunch');
@@ -25,7 +28,7 @@ test('automatic encrypted recovery follows journal changes and pauses on another
   await first.setOffline(false); await expect.poll(() => writes).toBe(3); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible();
   const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo');
   await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();
-  await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill(key); await other.getByLabel('I saved my recovery key').check(); await other.getByLabel('Automatically back up journal').check();
+  await other.getByRole('button', { name: 'Profile' }).click(); await other.getByLabel('Recovery key', { exact: true }).fill(key); await other.getByRole('button', { name: 'I saved my recovery key' }).click();
   await expect(other.getByText('Automatic backup paused:', { exact: false })).toBeVisible(); expect(writes).toBe(3);
   const dismissed = other.waitForEvent('dialog').then(dialog => dialog.dismiss()); await other.getByRole('button', { name: 'Use this journal for backups' }).click(); await dismissed; await expect(other.getByText('Automatic backup paused:', { exact: false })).toBeVisible(); expect(writes).toBe(3);
   const accepted = other.waitForEvent('dialog').then(dialog => dialog.accept()); await other.getByRole('button', { name: 'Use this journal for backups' }).click(); await accepted; await expect.poll(() => writes).toBe(4); await expect(other.getByText('Journal backed up to Walrus.')).toBeVisible();
@@ -41,7 +44,7 @@ test('automatic recovery checks an uncertain write before retrying', async ({ pa
     else await route.fulfill({ status: 404, json: { error: 'No recovery backup found.' } });
   });
   await page.goto('/?walrus=mainnet-demo'); await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click(); await page.getByLabel('I saved my recovery key').check(); await page.getByLabel('Automatically back up journal').check();
+  await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click(); await page.getByRole('button', { name: 'I saved my recovery key' }).click();
   await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(1);
   await page.getByRole('button', { name: 'Retry backup' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
 });
@@ -53,7 +56,7 @@ test('encrypted journal recovery restores activity in a separate browser without
     const body = route.request().postDataJSON(), token = route.request().headers().authorization;
     if (body.action === 'backupSave') { record = { token, envelope: body.envelope }; await route.fulfill({ json: { saved: true } }); }
     else if (body.action === 'backupRestore' && record?.token === token) await route.fulfill({ json: { envelope: record.envelope } });
-    else await route.fulfill({ status: 404, json: { error: 'not found' } });
+    else await route.fulfill({ status: 404, json: { error: 'No recovery backup found.' } });
   };
   await first.route('**/api/phone/walrus', handle); await second.route('**/api/phone/walrus', handle);
   const page = await first.newPage(); await page.goto('/?walrus=mainnet-demo');
@@ -61,8 +64,8 @@ test('encrypted journal recovery restores activity in a separate browser without
   await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Fictional lunch'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click();
   const key = await page.getByLabel('Recovery key', { exact: true }).inputValue();
-  await page.getByLabel('I saved my recovery key').check(); await page.getByRole('button', { name: 'Back up journal' }).click();
-  await expect(page.getByText('Encrypted journal backup saved.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'I saved my recovery key' }).click();
+  await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible();
   expect(record?.token).not.toContain(key); expect(JSON.stringify(record?.envelope)).not.toContain('Fictional lunch');
   const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo');
   await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();

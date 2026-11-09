@@ -7,7 +7,7 @@ test('live automatic backup restores a fictional journal on another device', asy
     const page = await first.newPage(); await page.goto('/?walrus=mainnet-demo');
     await page.getByLabel('Nickname').fill('Auto recovery test'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click(); const key = await page.getByLabel('Recovery key', { exact: true }).inputValue();
-    await page.getByLabel('I saved my recovery key').check(); await page.getByLabel('Automatically back up journal').check(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible({ timeout: 90000 });
+    await page.getByRole('button', { name: 'I saved my recovery key' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible({ timeout: 90000 });
     await page.getByRole('button', { name: 'Home' }).click(); await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Fictional automatic expense'); await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible({ timeout: 90000 });
     const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo'); await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -25,11 +25,11 @@ test('live Walrus restores a fictional encrypted journal in another isolated bro
     await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Fictional expense'); await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Fictional goal'); await page.getByLabel('Goal target in PHP').fill('500'); await page.getByLabel('Target date', { exact: true }).fill((await page.getByLabel('Target date', { exact: true }).getAttribute('min'))!); await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Generate key' }).click();
-    const key = await page.getByLabel('Recovery key', { exact: true }).inputValue(); await page.getByLabel('I saved my recovery key').check(); await page.getByRole('button', { name: 'Back up journal' }).click();
-    await expect(page.getByText('Encrypted journal backup saved.', { exact: false })).toBeVisible({ timeout: 90000 });
+    const key = await page.getByLabel('Recovery key', { exact: true }).inputValue(); await page.getByRole('button', { name: 'I saved my recovery key' }).click();
+    await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible({ timeout: 90000 });
     await page.getByRole('button', { name: 'Home' }).click(); await page.getByRole('button', { name: 'Add income' }).click(); await page.getByLabel('Amount in PHP').fill('20'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await page.getByRole('button', { name: 'Profile' }).click(); await page.getByLabel('I saved my recovery key').check(); await page.getByRole('button', { name: 'Back up journal' }).click();
-    await expect(page.getByText('Encrypted journal backup saved.', { exact: false })).toBeVisible({ timeout: 90000 });
+    await page.getByRole('button', { name: 'Profile' }).click();
+    await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible({ timeout: 90000 });
     const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo');
     await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();
     await other.getByRole('button', { name: 'Profile' }).click(); await other.getByRole('button', { name: 'Generate key' }).click();
