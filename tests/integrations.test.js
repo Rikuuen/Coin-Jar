@@ -170,3 +170,16 @@ test('installed gRPC SDK and transport construct without a network call', async 
   });
   assert.equal(typeof adapter.getBalance, 'function');
 });
+
+test('Tatum transaction adapter requests effects and preserves unknown execution status', async () => {
+  const digest = 'A'.repeat(44);
+  let status = { success: true, error: null };
+  const adapter = await createTatumAdapter({ network: 'mainnet', client: { getTransaction: async options => {
+    assert.deepEqual(options, { digest, include: { effects: true, transaction: true, balanceChanges: true } });
+    return { Transaction: { digest, status, checkpoint: '1', transaction: {}, balanceChanges: [] } };
+  } } });
+  assert.equal((await adapter.getTransaction(digest)).success, true);
+  status = { success: false, error: { $kind: 'Unknown' } };
+  assert.equal((await adapter.getTransaction(digest)).success, null);
+  await assert.rejects(adapter.getTransaction('bad'), /Invalid transaction digest/);
+});

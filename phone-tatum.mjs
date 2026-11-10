@@ -17,7 +17,9 @@ export function createPhoneTatumHandler({ env = process.env, adapterFactory = cr
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 1024) return send(413, { error: 'Request too large.' }); }
       const input = JSON.parse(body);
-      if (!input || Object.keys(input).join(',') !== 'address' || typeof input.address !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(input.address)) return send(400, { error: 'Enter a valid Sui address.' });
+      const transactionLookup = input && Object.keys(input).sort().join(',') === 'address,digest';
+      if (!input || (!transactionLookup && Object.keys(input).join(',') !== 'address') || typeof input.address !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(input.address)) return send(400, { error: 'Enter a valid Sui address.' });
+      if (transactionLookup && (typeof input.digest !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(input.digest))) return send(400, { error: 'Enter a valid transaction digest.' });
       if (personal) {
         const key = env.MEMWAL_MAINNET_PRIVATE_KEY || (env.COINJAR_MAINNET_USE_CURRENT_KEY === '1' ? env.MEMWAL_PRIVATE_KEY : undefined);
         if (!key || !env.MEMWAL_MAINNET_ACCOUNT_ID) return send(503, { error: 'Memory verification is unavailable.' });
@@ -35,6 +37,18 @@ export function createPhoneTatumHandler({ env = process.env, adapterFactory = cr
         if (!verified) return send(401, { error: 'Save your Walrus preferences before checking the wallet balance.' });
       }
       const adapter = await adapterFactory({ apiKey: env.TATUM_API_KEY, network: 'mainnet' });
+      if (transactionLookup) {
+        const tx = await adapter.getTransaction(input.digest);
+        if (tx.network !== 'mainnet' || tx.digest !== input.digest || typeof tx.success !== 'boolean' || typeof tx.checkpoint !== 'string' || !/^\d+$/.test(tx.checkpoint) || !Array.isArray(tx.balanceChanges) || tx.balanceChanges.length > 1000) throw Error('Invalid transaction response');
+        const changes = new Map();
+        for (const change of tx.balanceChanges) {
+          if (!change || typeof change.address !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(change.address) || typeof change.coinType !== 'string' || change.coinType.length > 256 || !/^0x[0-9a-fA-F]{1,64}::[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*$/.test(change.coinType) || typeof change.amount !== 'string' || !/^-?\d{1,80}$/.test(change.amount)) throw Error('Invalid balance change');
+          if (change.address.slice(2).toLowerCase().padStart(64, '0') === input.address.slice(2).toLowerCase()) changes.set(change.coinType, (changes.get(change.coinType) ?? 0n) + BigInt(change.amount));
+        }
+        const walletChanges = [...changes].filter(([, amount]) => amount !== 0n).map(([coinType, amount]) => ({ coinType, amount: amount.toString() }));
+        if (walletChanges.some(change => !/^-?\d{1,80}$/.test(change.amount))) throw Error('Invalid balance change total');
+        return send(200, { network: 'mainnet', digest: tx.digest, status: tx.success ? 'success' : 'failed', checkpoint: tx.checkpoint, address: input.address.toLowerCase(), changes: walletChanges });
+      }
       const result = await adapter.getBalance(input.address);
       if (result.network !== 'mainnet' || result.coinType !== '0x2::sui::SUI' || typeof result.balanceMist !== 'string' || !/^\d{1,80}$/.test(result.balanceMist)) throw new Error('Invalid provider response');
       return send(200, { balanceMist: result.balanceMist, network: 'mainnet', checkedAt: new Date().toISOString() });

@@ -46,7 +46,7 @@ export async function createTatumAdapter({
       const result = await client.getTransaction({ digest, include: { effects: true, transaction: true, balanceChanges: true } });
       const transaction = result.Transaction ?? result.FailedTransaction;
       if (!transaction || transaction.digest !== digest) throw new Error('Invalid transaction response');
-      return { network, digest: transaction.digest, success: transaction.status?.success === true, checkpoint: transaction.checkpoint, timestampMs: transaction.timestampMs, sender: transaction.transaction?.sender, inputs: transaction.transaction?.inputs, balanceChanges: transaction.balanceChanges };
+      return { network, digest: transaction.digest, success: transaction.status?.error?.$kind === 'Unknown' ? null : transaction.status?.success, checkpoint: transaction.checkpoint, timestampMs: transaction.timestampMs, sender: transaction.transaction?.sender, inputs: transaction.transaction?.inputs, balanceChanges: transaction.balanceChanges };
     },
   };
 }

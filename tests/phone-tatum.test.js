@@ -59,3 +59,24 @@ test('wallet lookup is unavailable when the Tatum key is missing', async () => {
   try { assert.equal((await fetch(`http://127.0.0.1:${server.address().port}`, { method: 'POST' })).status, 503); }
   finally { await new Promise(resolve => server.close(resolve)); }
 });
+
+test('transaction lookup reports only the linked wallet net changes and rejects unconfirmed or invalid provider data', async () => {
+  const code = 'a'.repeat(43), origin = 'https://coinjar.example', address = '0x' + '1'.repeat(64), other = '0x' + '2'.repeat(64), digest = 'A'.repeat(44);
+  let tx = { network: 'mainnet', digest, success: true, checkpoint: '123', balanceChanges: [{ address, coinType: '0x2::sui::SUI', amount: '1000000000' }, { address, coinType: '0x2::sui::SUI', amount: '-10' }, { address: other, coinType: '0x2::sui::SUI', amount: '-1000000000' }] };
+  let calls = 0;
+  const server = createServer(createPhoneTatumHandler({ env: { COINJAR_PHONE_ACCESS_CODE: code, COINJAR_PHONE_ORIGIN: origin, TATUM_API_KEY: 'secret' }, adapterFactory: async () => ({ getTransaction: async value => { calls++; assert.equal(value, digest); return tx; } }) }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const send = (body, token = code) => fetch(`http://127.0.0.1:${server.address().port}`, { method: 'POST', headers: { origin, authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await send({ address, digest }, 'b'.repeat(43))).status, 401);
+    assert.equal((await send({ address, digest: 'bad' })).status, 400);
+    assert.equal((await send({ address, digest, extra: true })).status, 400);
+    assert.equal(calls, 0);
+    let result = await (await send({ address, digest })).json();
+    assert.deepEqual(result, { network: 'mainnet', digest, status: 'success', checkpoint: '123', address, changes: [{ coinType: '0x2::sui::SUI', amount: '999999990' }] });
+    tx = { ...tx, success: false }; result = await (await send({ address, digest })).json(); assert.equal(result.status, 'failed');
+    for (const invalid of [{ success: null }, { checkpoint: null }, { digest: 'B'.repeat(44) }, { network: 'testnet' }, { balanceChanges: null }, { balanceChanges: [{ address, coinType: 'invalid', amount: '1' }] }]) {
+      const original = tx; tx = { ...tx, ...invalid }; assert.equal((await send({ address, digest })).status, 502); tx = original;
+    }
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
