@@ -63,7 +63,11 @@
 .phone-app .phone-today h3 { margin: 0; color: rgba(255, 255, 255, .8); font-size: 14px; }
 .phone-today { container-type: inline-size; }
 .phone-today-value { margin: 10px 0 0; color: var(--green); font-size: clamp(28px, 8vw, 38px); font-weight: 700; line-height: 1.12; overflow-wrap: anywhere; }
-.phone-saved-today { font-size: min(20px, calc(160cqi / var(--saved-length))); white-space: nowrap; }
+.phone-saved-today { font-size: min(32px, calc(180cqi / var(--saved-length))); white-space: nowrap; }
+.phone-goal-list { display: grid; gap: 12px; margin-top: 16px; }
+.phone-goal-item { padding: 18px; border-radius: 18px; background: #fff; }
+.phone-goal-item .simple-button { width: 100%; margin-top: 14px; }
+.phone-app .phone-create-goal { width: 100%; margin-top: 18px; }
 .phone-app .phone-hero .phone-save-button { width: 100%; margin-top: 20px; }
 .phone-tomorrow { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, .12); }
 .phone-tomorrow-amount { margin: 0; color: #fff; font: 400 15px/1.5 'DM Sans', sans-serif; overflow-wrap: anywhere; }

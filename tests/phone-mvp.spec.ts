@@ -495,6 +495,44 @@ test('saved today message stays on one line within the card on phones', async ({
   }
 });
 
+test('multiple goals preserve existing savings and keep contributions separate', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
+  await page.addInitScript(() => localStorage.getItem('coinjar.phone.demo.journal.v1') || localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 1000000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: [{ id: 'c', kind: 'contribution', amountCents: 120000, date: '2026-01-09', note: '', createdAt: '' }], adjustments: [], goal: { id: 'g', title: 'Emergency', targetCents: 500000, targetDate: '2026-01-19', status: 'active', createdAt: '' } })));
+  await page.goto('/'); await page.getByRole('button', { name: 'Goals', exact: true }).click();
+  await expect(page.getByText('₱1,200.00 saved of ₱5,000.00', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Create goal', exact: true }).click();
+  await page.getByLabel('Goal name').fill('Trip'); await page.getByLabel('Goal target in PHP').fill('3000'); await page.getByLabel('Target date', { exact: true }).fill('2026-01-19'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const trip = page.locator('.phone-goal-item').filter({ has: page.getByRole('heading', { name: 'Trip', exact: true }) });
+  await expect(trip).toContainText('₱0.00 saved');
+  await trip.getByRole('button', { name: 'Save for this goal' }).click();
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await expect(page.locator('.phone-goal')).toContainText('Trip');
+  await expect(page.locator('.simple-amount')).toHaveText('₱8,800.00');
+  await expect(page.locator('.phone-today-value')).toContainText('Save ');
+  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.phone-goal')).toContainText('₱300.00 saved of ₱3,000.00');
+  await page.reload(); await expect(page.locator('.phone-goal')).toContainText('₱300.00 saved of ₱3,000.00');
+  await page.getByRole('button', { name: 'Goals', exact: true }).click();
+  const emergency = page.locator('.phone-goal-item').filter({ has: page.getByRole('heading', { name: 'Emergency', exact: true }) });
+  await expect(emergency).toContainText('₱1,200.00 saved of ₱5,000.00');
+  await emergency.getByRole('button', { name: 'Save for this goal' }).click();
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await expect(page.locator('.phone-goal')).toContainText('₱1,200.00 saved of ₱5,000.00');
+  await expect(page.locator('.simple-amount')).toHaveText('₱8,500.00');
+});
+
+test('first goal created in Goals appears on Home', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-09T12:00:00Z'));
+  await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Goals', exact: true }).click();
+  await expect(page.getByText('Create your first savings goal.')).toBeVisible();
+  await page.getByRole('button', { name: 'Create goal', exact: true }).click();
+  await page.getByLabel('Goal name').fill('First goal'); await page.getByLabel('Goal target in PHP').fill('500'); await page.getByLabel('Target date', { exact: true }).fill('2026-01-19'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.phone-goal-item')).toContainText('First goal');
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await expect(page.locator('.phone-goal')).toContainText('First goal');
+});
+
 test('savings day resets at local midnight while the app remains open', async ({ browser }) => {
   const context = await browser.newContext({ baseURL: 'http://127.0.0.1:' + (process.env.PORT ?? '4371'), timezoneId: 'Asia/Manila' });
   try {

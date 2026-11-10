@@ -3,7 +3,7 @@ import { mainnetDemo } from './phoneNetwork';
 import { dailyEvidence } from './phoneDailyPattern';
 
 export const JOURNAL_KEY = mainnetDemo ? 'coinjar.phone.demo.journal.v1' : 'coinjar.phone.journal.v1';
-export type PhoneJournal = { version: 1; nickname?: string; walletAddress?: string; currency: 'PHP' | 'USD'; openingCents: number; openingDate: string; bufferCents: number; dailyLimitCents: number; entries: Entry[]; goal: Goal | null; adjustments: { id: string; date: string; deltaCents: number; createdAt: string }[] };
+export type PhoneJournal = { version: 1 | 2; nickname?: string; walletAddress?: string; currency: 'PHP' | 'USD'; openingCents: number; openingDate: string; bufferCents: number; dailyLimitCents: number; entries: (Entry & { goalId?: string })[]; goal: Goal | null; otherGoals?: Goal[]; adjustments: { id: string; date: string; deltaCents: number; createdAt: string }[] };
 const amount = (n: unknown) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 const text = (s: unknown, max: number) => typeof s === 'string' && s.length <= max;
 const date = (d: unknown): d is string => typeof d === 'string' && validateDate(d);
@@ -13,15 +13,22 @@ export function validateJournal(value: unknown): PhoneJournal {
   const j = value as PhoneJournal;
   if (j.nickname !== undefined && (!text(j.nickname, 40) || !j.nickname.trim())) throw new Error('Invalid backup file.');
   if (j.walletAddress !== undefined && (typeof j.walletAddress !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(j.walletAddress))) throw new Error('Invalid backup file.');
-  if (j.version !== 1 || !['PHP', 'USD'].includes(j.currency) || !amount(j.openingCents) || !date(j.openingDate) || !amount(j.bufferCents) || !amount(j.dailyLimitCents) || !Array.isArray(j.entries) || j.entries.length > 10000 || !Array.isArray(j.adjustments) || j.adjustments.length > 10000) throw new Error('Invalid backup file.');
+  if (![1, 2].includes(j.version) || !['PHP', 'USD'].includes(j.currency) || !amount(j.openingCents) || !date(j.openingDate) || !amount(j.bufferCents) || !amount(j.dailyLimitCents) || !Array.isArray(j.entries) || j.entries.length > 10000 || !Array.isArray(j.adjustments) || j.adjustments.length > 10000) throw new Error('Invalid backup file.');
   if (j.entries.some(e => !e || !text(e.id, 100) || !e.id || !['income', 'expense', 'contribution'].includes(e.kind) || !amount(e.amountCents) || !e.amountCents || !date(e.date) || e.date < j.openingDate || !text(e.note, 80) || !text(e.createdAt, 100))) throw new Error('Invalid backup file.');
   if (j.adjustments.some(a => !a || !text(a.id, 100) || !a.id || !date(a.date) || a.date < j.openingDate || !Number.isSafeInteger(a.deltaCents) || !text(a.createdAt, 100))) throw new Error('Invalid backup file.');
   if (j.goal !== null && (!j.goal || !text(j.goal.id, 100) || !j.goal.id || !text(j.goal.title, 80) || !j.goal.title.trim() || !amount(j.goal.targetCents) || !j.goal.targetCents || (j.goal.targetDate !== undefined && !date(j.goal.targetDate)) || (j.goal.phoneStartDate !== undefined && !date(j.goal.phoneStartDate)) || (j.goal.phoneBaselineCents !== undefined && !amount(j.goal.phoneBaselineCents)) || j.goal.status !== 'active' || !text(j.goal.createdAt, 100))) throw new Error('Invalid backup file.');
   if (j.goal && ((j.goal.phoneBaselineCents !== undefined && j.goal.phoneBaselineCents > j.goal.targetCents) || (j.goal.phoneStartDate && j.goal.targetDate && j.goal.phoneStartDate > j.goal.targetDate))) throw new Error('Invalid backup file.');
   if (j.goal?.wallet !== undefined && (!j.goal.wallet || typeof j.goal.wallet.address !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(j.goal.wallet.address))) throw new Error('Invalid backup file.');
+  if (j.version === 2) {
+    if (!Array.isArray(j.otherGoals) || j.otherGoals.length > 100 || (!j.goal && j.otherGoals.length)) throw new Error('Invalid backup file.');
+    const goals = [j.goal, ...j.otherGoals].filter((g): g is Goal => g !== null);
+    if (new Set(goals.map(g => g.id)).size !== goals.length) throw new Error('Invalid backup file.');
+    for (const goal of j.otherGoals) validateJournal({ ...j, version: 1, goal, otherGoals: undefined, entries: [] });
+    if (j.entries.some(e => e.goalId !== undefined && (e.kind !== 'contribution' || !goals.some(g => g.id === e.goalId)))) throw new Error('Invalid backup file.');
+  } else if (j.otherGoals !== undefined || j.entries.some(e => e.goalId !== undefined)) throw new Error('Invalid backup file.');
   const ids = [...j.entries.map(e => e.id), ...j.adjustments.map(a => a.id)];
   if (new Set(ids).size !== ids.length) throw new Error('Invalid backup file.');
-  const normalized: PhoneJournal = { version: 1, ...(j.nickname ? { nickname: j.nickname.trim() } : {}), ...(j.walletAddress ? { walletAddress: j.walletAddress.toLowerCase() } : {}), currency: j.currency, openingCents: j.openingCents, openingDate: j.openingDate, bufferCents: j.bufferCents, dailyLimitCents: j.dailyLimitCents, entries: j.entries.map(({ id, kind, amountCents, date, note, createdAt }) => ({ id, kind, amountCents, date, note, createdAt })), adjustments: j.adjustments.map(({ id, date, deltaCents, createdAt }) => ({ id, date, deltaCents, createdAt })), goal: j.goal ? { id: j.goal.id, title: j.goal.title, targetCents: j.goal.targetCents, ...(j.goal.targetDate ? { targetDate: j.goal.targetDate } : {}), ...(j.goal.phoneStartDate ? { phoneStartDate: j.goal.phoneStartDate } : {}), ...(j.goal.phoneBaselineCents !== undefined ? { phoneBaselineCents: j.goal.phoneBaselineCents } : {}), ...(j.goal.wallet ? { wallet: { address: j.goal.wallet.address.toLowerCase() } } : {}), status: 'active', createdAt: j.goal.createdAt } : null };
+  const normalized: PhoneJournal = { version: j.version, ...(j.nickname ? { nickname: j.nickname.trim() } : {}), ...(j.walletAddress ? { walletAddress: j.walletAddress.toLowerCase() } : {}), currency: j.currency, openingCents: j.openingCents, openingDate: j.openingDate, bufferCents: j.bufferCents, dailyLimitCents: j.dailyLimitCents, entries: j.entries.map(({ id, kind, amountCents, date, note, createdAt, goalId }) => ({ id, kind, amountCents, date, note, createdAt, ...(goalId ? { goalId } : {}) })), adjustments: j.adjustments.map(({ id, date, deltaCents, createdAt }) => ({ id, date, deltaCents, createdAt })), goal: j.goal ? { id: j.goal.id, title: j.goal.title, targetCents: j.goal.targetCents, ...(j.goal.targetDate ? { targetDate: j.goal.targetDate } : {}), ...(j.goal.phoneStartDate ? { phoneStartDate: j.goal.phoneStartDate } : {}), ...(j.goal.phoneBaselineCents !== undefined ? { phoneBaselineCents: j.goal.phoneBaselineCents } : {}), ...(j.goal.wallet ? { wallet: { address: j.goal.wallet.address.toLowerCase() } } : {}), status: 'active', createdAt: j.goal.createdAt } : null, ...(j.version === 2 ? { otherGoals: j.otherGoals!.map(goal => validateJournal({ ...j, version: 1, goal, otherGoals: undefined, entries: [] }).goal!) } : {}) };
   const state = journalState(normalized);
   getSummary(state, '9999-12-31');
   return normalized;
@@ -41,6 +48,13 @@ export function journalState(j: PhoneJournal): AppState {
 export function savings(j: PhoneJournal, today: string, rememberedDays: number[] = [], rememberedSpike = false) {
   const state = journalState(j);
   const summary = getSummary(state, today), goal = j.goal, reasons: string[] = [];
+  if (j.version === 2) {
+    const saved = goalSaved(j, goal?.id, today);
+    summary.savedCents = saved;
+    summary.totalGoalCents = saved;
+    summary.remainingCents = Math.max(0, (goal?.targetCents ?? 0) - saved);
+    summary.progress = goal?.targetCents ? Math.min(1, saved / goal.targetCents) : 0;
+  }
   let amountCents = 0, baselineCents = 0;
   const dayNumber = (value: string) => Math.floor(Date.parse(`${value}T00:00:00Z`) / 86400000);
   if (!goal) reasons.push('Create a goal to receive a suggestion.');
@@ -49,7 +63,7 @@ export function savings(j: PhoneJournal, today: string, rememberedDays: number[]
   else {
     const daysLeft = dayNumber(goal.targetDate) - dayNumber(today) + 1;
     baselineCents = daysLeft > 0 ? Math.ceil(summary.remainingCents / daysLeft) : 0;
-    const savedToday = j.entries.some(e => e.kind === 'contribution' && e.date === today);
+    const savedToday = j.entries.some(e => e.kind === 'contribution' && e.date === today && (j.version === 1 || e.goalId === goal.id));
     if (daysLeft <= 0) reasons.push('The target date has passed. Update your goal date to make a new plan.');
     else if (savedToday) reasons.push('You already recorded savings today.');
     else {
@@ -75,6 +89,14 @@ export function savings(j: PhoneJournal, today: string, rememberedDays: number[]
     if (daysLeft === 1 && savedToday && summary.remainingCents) reasons.push('Your target date is today and your goal is not yet complete.');
   }
   return { summary, recommendation: { amountCents, baselineCents, reasons, reason: reasons.join(' ') } };
+}
+
+export function goalSaved(j: PhoneJournal, goalId: string | undefined, today: string) {
+  return j.entries.filter(e => e.kind === 'contribution' && e.date <= today && (j.version === 1 || e.goalId === goalId)).reduce((sum, e) => sum + e.amountCents, 0);
+}
+
+export function upgradeGoals(j: PhoneJournal): PhoneJournal {
+  return j.version === 2 ? j : { ...j, version: 2, otherGoals: [], entries: j.entries.map(e => e.kind === 'contribution' && j.goal ? { ...e, goalId: j.goal.id } : e) };
 }
 
 export function newJournal(currency: 'PHP' | 'USD', openingCents: number, today: string, nickname?: string): PhoneJournal {
