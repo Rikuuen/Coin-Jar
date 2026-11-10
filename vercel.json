@@ -1,5 +1,4 @@
 {
-  "git": { "deploymentEnabled": { "codex/tatum-transaction-lookup": false } },
   "services": {
     "coinjar": {
       "root": ".",
