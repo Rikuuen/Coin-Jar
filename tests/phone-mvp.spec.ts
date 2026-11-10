@@ -41,28 +41,17 @@ test('activity groups entries and calculates the last seven days', async ({ page
   await expect(page.locator('.phone-entry').filter({ hasText: 'Pay' })).toContainText('Recorded time unavailable');
 });
 
-test('correcting a saving preserves history and recalculates the goal and balance', async ({ page }) => {
+test('existing corrections remain accurate without correction controls', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-01-10T12:00:00Z'));
-  await page.addInitScript(() => { if (!localStorage.getItem('coinjar.phone.demo.journal.v1')) localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 1000000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: [{ id: 'original', kind: 'contribution', amountCents: 120000, date: '2026-01-10', note: '', createdAt: '' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-01-20', status: 'active', createdAt: '' } })); });
-  await page.goto('/'); await page.getByRole('button', { name: 'Activity', exact: true }).click();
-  await page.getByRole('button', { name: 'Correct', exact: true }).click();
-  await page.getByLabel('Amount in PHP').fill('1000'); await page.getByLabel('Date', { exact: true }).fill('2026-01-09'); await page.getByRole('button', { name: 'Save correction' }).click();
-  await expect(page.getByText('Corrected · excluded from totals')).toBeVisible();
-  await expect(page.getByText('Corrected entry', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Home', exact: true }).click();
-  await expect(page.locator('.simple-amount')).toHaveText('₱9,000.00');
+  await page.addInitScript(() => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 3, currency: 'PHP', openingCents: 1000000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: [{ id: 'original', kind: 'contribution', goalId: 'g', amountCents: 120000, date: '2026-01-10', note: '', createdAt: '', voidedAt: '2026-01-10T00:00:00Z' }, { id: 'new', kind: 'contribution', goalId: 'g', correctionOf: 'original', amountCents: 100000, date: '2026-01-09', note: '', createdAt: '' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-01-20', status: 'active', createdAt: '' }, otherGoals: [] })));
+  await page.goto('/'); await expect(page.locator('.simple-amount')).toHaveText('₱9,000.00');
   await expect(page.locator('.phone-goal')).toContainText('₱1,000.00 saved of ₱5,000.00');
-  await expect(page.locator('.phone-today-value')).toContainText('Save ');
-  await page.reload(); await expect(page.locator('.simple-amount')).toHaveText('₱9,000.00');
-});
-
-test('a saving corrected before the first goal stays with that goal', async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2026-01-10T12:00:00Z'));
-  await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('200'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('button', { name: 'Activity', exact: true }).click(); await page.getByRole('button', { name: 'Correct', exact: true }).click(); await page.getByLabel('Amount in PHP').fill('100'); await page.getByRole('button', { name: 'Save correction' }).click();
-  await page.getByRole('button', { name: 'Goals', exact: true }).click(); await page.getByRole('button', { name: 'Create goal', exact: true }).click(); await page.getByLabel('Goal name').fill('First'); await page.getByLabel('Goal target in PHP').fill('500'); await page.getByLabel('Target date', { exact: true }).fill('2026-01-20'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.locator('.phone-goal-item')).toContainText('₱100.00 saved of ₱500.00');
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Correct', exact: true })).toHaveCount(0);
+  await expect(page.locator('.phone-entry')).toHaveCount(1);
+  await expect(page.locator('.phone-entry')).toContainText('₱1,000.00');
+  const journal = await page.evaluate(() => JSON.parse(localStorage.getItem('coinjar.phone.demo.journal.v1')!));
+  expect(journal.entries).toHaveLength(2);
 });
 
 test('plain link opens the longer-link journal without exposing or deleting the other journal', async ({ browser }) => {

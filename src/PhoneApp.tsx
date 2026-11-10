@@ -27,7 +27,6 @@ export default function PhoneApp() {
   const [error, setError] = useState(initial.error);
   const [notice, setNotice] = useState('');
   const [panel, setPanel] = useState<Panel>(null);
-  const [editing, setEditing] = useState<Entry | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
   const [reminders, setReminders] = useState(() => { try { return localStorage.getItem('coinjar.phone.reminder.enabled.v1') === '1'; } catch { return false; } });
   const [reminderVisible, setReminderVisible] = useState(false);
@@ -81,7 +80,6 @@ export default function PhoneApp() {
     if (panel === 'settings') document.getElementById('phone-savings-settings')?.scrollIntoView({ block: 'start' });
   }, [panel]);
 
-  useEffect(() => { if (editing) document.getElementById('phone-correct-entry')?.scrollIntoView({ block: 'start' }); }, [editing]);
   useEffect(() => {
     if (!reminders) { setReminderVisible(false); return; }
     let timer: number;
@@ -110,23 +108,6 @@ export default function PhoneApp() {
       setRaw(value); setJournal(JSON.parse(value)); setError(''); setPanel(null);
       return true;
     } catch (e) { setError(e instanceof Error && e.message.includes('another tab') ? e.message : 'Could not save on this device. Check browser storage and try again.'); return false; }
-  }
-
-  function correctEntry(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!journal || !editing || !summary) return;
-    try {
-      const upgraded = upgradeGoals(journal), old = upgraded.entries.find(entry => entry.id === editing.id);
-      if (!old || old.voidedAt) throw Error('This entry was already corrected. Reload and try again.');
-      const data = new FormData(event.currentTarget), amountCents = parseMoney(String(data.get('amount') ?? '')), date = String(data.get('date') ?? ''), note = String(data.get('note') ?? '').trim();
-      if (!amountCents) throw Error('Enter an amount above zero.');
-      if (!validateDate(date) || date < journal.openingDate || date > today) throw Error('Choose a date from your opening balance through today.');
-      if (old.kind === 'contribution' && amountCents > Math.max(0, summary.summary.availableCents + old.amountCents)) throw Error('Recorded savings cannot exceed your available balance.');
-      const now = new Date().toISOString();
-      const replacement = { id: crypto.randomUUID(), kind: old.kind, amountCents, date, note, createdAt: now, correctionOf: old.id, ...(old.goalId ? { goalId: old.goalId } : {}) };
-      const entries = [...upgraded.entries.map(entry => entry.id === old.id ? { ...entry, voidedAt: now } : entry), replacement];
-      if (save({ ...upgraded, version: 3, entries })) { setEditing(null); setNotice('Entry corrected. The original remains in your history.'); }
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not correct this entry.'); }
   }
 
   function linkWallet(address: string | null) {
@@ -268,7 +249,7 @@ export default function PhoneApp() {
         {goal && <PhoneWallet mode="goal" code={autoMemory.config.code} personal={autoMemory.config.enabled && autoMemory.config.personal} address={walletAddress} goalId={goal.id} openProfile={() => setTab('profile')} />}
       </>}
       {tab === 'goals' && <><section className="simple-section phone-goals"><h1>Goals</h1>{goal ? <div className="phone-goal-list">{[goal, ...(journal.otherGoals ?? [])].map(item => { const saved = goalSaved(journal, item.id, today); const percent = item.targetCents ? Math.min(100, Math.round(saved / item.targetCents * 100)) : 0; return <div className="phone-goal-item" key={item.id}><div className="simple-label-row"><h2>{item.title}</h2>{item.id === goal.id && <span className="phone-chip on">Active</span>}</div><p className="simple-hint">{money(saved)} saved of {money(item.targetCents)} · {percent}%</p><div className="phone-progress" role="progressbar" aria-label={`${item.title} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div>{item.targetDate && <p className="simple-hint">Target: {item.targetDate}</p>}{item.id !== goal.id && <button type="button" className="simple-button outline" onClick={() => { const next = upgradeGoals(journal); save({ ...next, goal: item, otherGoals: [next.goal!, ...next.otherGoals!.filter(g => g.id !== item.id)] }); }}>Save for this goal</button>}</div>; })}</div> : <p className="simple-empty">Create your first savings goal.</p>}<button type="button" className="simple-button primary phone-create-goal" onClick={() => setPanel('goal-new')}>Create goal</button></section>{panel === 'goal-new' && panelForm}</>}
-      {tab === 'activity' && <><ActivityList journal={journal} today={today} money={money} edit={entry => { setEditing(entry); setError(''); }} />{editing && <section className="simple-form" id="phone-correct-entry"><div className="simple-label-row"><h2>Correct entry</h2><button type="button" className="simple-link" onClick={() => setEditing(null)}>Cancel</button></div><form onSubmit={correctEntry}><label>Amount in {journal.currency}<input name="amount" inputMode="decimal" required defaultValue={(editing.amountCents / 100).toFixed(2)} /></label><label>Note (optional)<input name="note" maxLength={80} defaultValue={editing.note} /></label><label>Date<input name="date" type="date" min={journal.openingDate} max={today} defaultValue={editing.date} required /></label><p className="simple-hint">The original stays in your history. Totals use the corrected entry.</p><button className="simple-button primary">Save correction</button></form></section>}</>}
+      {tab === 'activity' && <ActivityList journal={journal} today={today} money={money} />}
       {tab === 'profile' && <><section className="simple-section phone-profile"><span className="phone-avatar large" aria-hidden="true">{(journal.nickname || 'C').slice(0, 1)}</span><div><h1>{journal.nickname || 'Your profile'}</h1><p className="simple-hint">Saving in {journal.currency} · since {journal.openingDate}</p></div></section><section className="simple-section"><h2>Daily reminder</h2><label className="simple-check"><input type="checkbox" checked={reminders} onChange={event => { try { if (event.target.checked) localStorage.setItem('coinjar.phone.reminder.enabled.v1', '1'); else localStorage.removeItem('coinjar.phone.reminder.enabled.v1'); setReminders(event.target.checked); } catch { setError('Could not save reminder settings on this device.'); } }} /> Remind me at 8 PM</label><p className="simple-hint">Appears in CoinJar while it is open. No notification is sent when the app is closed.</p></section><section className="simple-section profile-settings"><div className="phone-card-head"><h2>Memory settings</h2><span className={`phone-chip${autoMemory.config.enabled ? ' on' : ''}`}>{autoMemory.config.enabled ? 'On' : 'Off'}</span></div><p className="simple-hint">Choose how CoinJar remembers your spending patterns.</p><button className="simple-button outline" onClick={() => { setSettingsAuto(autoMemory.config.enabled); setSettingsHabits(autoMemory.config.habits); setSettingsRecent(autoMemory.config.recentHabits); setSettingsCode(autoMemory.config.code); setSettingsPersonal(autoMemory.config.personal || !autoMemory.config.enabled); setSettingsSaved(autoMemory.config.enabled); setSettingsRestoring(autoMemory.config.restorePending); setPanel('settings'); }}>Savings settings</button>{autoMemory.status && <p className="simple-hint" role="status">{autoMemory.status}</p>}{panel === 'settings' && panelForm}</section></>}<div hidden={tab !== 'profile'}><PhoneRecovery journal={journal} memoryCode={autoMemory.config.code} apply={value => save(value)} onStatusChange={setBackupStatus} /></div>{tab === 'profile' && <><PhoneWallet mode="profile" code={autoMemory.config.code} address={walletAddress} link={linkWallet} /><details className="simple-section" open={memoryToolsOpen || autoMemory.config.restorePending} onToggle={event => setMemoryToolsOpen(event.currentTarget.open)}><summary>Restore preferences</summary><PhoneWalrus journal={journal} apply={value => { const applied = save(value); if (applied && autoMemory.config.restorePending) autoMemory.finishRecovery(); return applied; }} personal={autoMemory.config.personal} savedCode={autoMemory.config.code} /></details></>}{backup}</>}
   </main></div>;
 }
@@ -290,8 +271,8 @@ function entryRecordedAt(value: string) {
   return `Recorded ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))}`;
 }
 
-function ActivityList({ journal, today, money, edit }: { journal: PhoneJournal; today: string; money: (cents: number) => string; edit: (entry: Entry) => void }) {
-  const entries = [...journal.entries].reverse();
+function ActivityList({ journal, today, money }: { journal: PhoneJournal; today: string; money: (cents: number) => string }) {
+  const entries = journal.entries.filter(entry => !entry.voidedAt).reverse();
   if (!entries.length) return <section className="simple-section phone-activity"><h1>Recent activity</h1><div className="phone-activity-empty"><EntryIcon kind="contribution" /><p className="simple-empty">Your activity will appear here. Add income, an expense or savings from Home.</p></div></section>;
   const weekStart = dayMs(today) - 6 * 86400000;
   const week = { income: 0, expense: 0, contribution: 0 };
@@ -308,7 +289,7 @@ function ActivityList({ journal, today, money, edit }: { journal: PhoneJournal; 
     {days.map(date => {
       const items = entries.filter(entry => entry.date === date);
       return <div className="phone-day" key={date}><div className="phone-day-head"><h2>{dayLabel(date, today)}</h2><span>{new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(dayMs(date)))}</span></div>
-        <div className="phone-day-list">{items.map(entry => <div className={`simple-row phone-entry ${entry.kind}`} key={entry.id}><EntryIcon kind={entry.kind} /><div className="phone-entry-text"><strong>{entry.note || KIND_LABEL[entry.kind]}</strong>{entry.note && <small>{KIND_LABEL[entry.kind]}</small>}<small>{entryRecordedAt(entry.createdAt)}</small>{entry.voidedAt ? <small>Corrected · excluded from totals</small> : <><small>{entry.correctionOf ? 'Corrected entry' : ''}</small><button type="button" className="simple-link" onClick={() => edit(entry)}>Correct</button></>}</div><strong className="phone-entry-amount">{addsToBalance(entry.kind) ? '+' : entry.kind === 'expense' ? '−' : ''}{money(entry.amountCents)}</strong></div>)}</div>
+        <div className="phone-day-list">{items.map(entry => <div className={`simple-row phone-entry ${entry.kind}`} key={entry.id}><EntryIcon kind={entry.kind} /><div className="phone-entry-text"><strong>{entry.note || KIND_LABEL[entry.kind]}</strong>{entry.note && <small>{KIND_LABEL[entry.kind]}</small>}<small>{entryRecordedAt(entry.createdAt)}</small></div><strong className="phone-entry-amount">{addsToBalance(entry.kind) ? '+' : entry.kind === 'expense' ? '−' : ''}{money(entry.amountCents)}</strong></div>)}</div>
       </div>;
     })}
   </section>;

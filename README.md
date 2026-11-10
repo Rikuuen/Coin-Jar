@@ -6,7 +6,7 @@ The journal stays in the browser. Optional Walrus Memory stores approved prefere
 
 The plain app URL opens the journal previously accessed through the longer mainnet URL. The former plain-link journal is not shown or deleted. Older recovery and personal memory namespaces remain accessible.
 
-Activity entries can be corrected without deleting the original. Corrected originals remain visible but do not count in totals, goal progress, or spending patterns. The optional 8 PM reminder appears only while CoinJar is open and uses the device's local time. It does not send background notifications; reminder settings are stored on that device.
+Previously corrected entries retain their original history in the journal and backup; only the latest entry appears in activity and counts toward totals. The optional 8 PM reminder appears only while CoinJar is open and uses the device's local time. It does not send background notifications; reminder settings are stored on that device.
 
 ## Run the phone app
 
