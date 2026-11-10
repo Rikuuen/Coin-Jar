@@ -495,6 +495,24 @@ test('saved today message stays on one line within the card on phones', async ({
   }
 });
 
+test('savings day resets at local midnight while the app remains open', async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: 'http://127.0.0.1:' + (process.env.PORT ?? '4371'), timezoneId: 'Asia/Manila' });
+  try {
+    const page = await context.newPage();
+    await page.clock.install({ time: new Date('2026-11-09T15:59:59Z') });
+    await page.addInitScript(() => localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 1000000, openingDate: '2026-11-01', bufferCents: 0, dailyLimitCents: 0, entries: [{ id: 'c', kind: 'contribution', amountCents: 120000, date: '2026-11-09', note: '', createdAt: '2026-11-09T12:00:00Z' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-11-20', status: 'active', createdAt: '' } })));
+    await page.goto('/');
+    await expect(page.locator('.phone-today-value')).toHaveText('You saved ₱1,200.00 today!');
+    await page.clock.runFor(2000);
+    await expect(page.locator('.phone-today-value')).toContainText('Save ');
+    await page.getByRole('button', { name: 'Activity', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Yesterday', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Home', exact: true }).click();
+    await page.reload();
+    await expect(page.locator('.phone-today-value')).toContainText('Save ');
+  } finally { await context.close(); }
+});
+
 test('savings settings opens in view on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto('/');

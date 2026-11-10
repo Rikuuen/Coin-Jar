@@ -45,7 +45,7 @@ export default function PhoneApp() {
   const [settingsPersonal, setSettingsPersonal] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [settingsRestoring, setSettingsRestoring] = useState(false);
-  const today = localDate();
+  const [today, setToday] = useState(localDate);
   const habit = usePhoneHabitMemory(journal, today, autoMemory.config.enabled && !autoMemory.config.restorePending && autoMemory.config.habits, autoMemory.config.code, autoMemory.config.personal);
   const recent = usePhoneSpikeMemory(journal, today, autoMemory.config.enabled && !autoMemory.config.restorePending && autoMemory.config.recentHabits, autoMemory.config.code, autoMemory.config.personal);
   const summary = journal ? savings(journal, today, habit.remembered?.days ?? [], Boolean(recent.remembered)) : null;
@@ -59,6 +59,20 @@ export default function PhoneApp() {
   const savedTodayText = `You saved ${money(savedToday)} today!`;
   const progress = summary ? Math.min(1, Math.max(0, summary.summary.progress)) : 0;
   const daysLeft = goal?.targetDate ? Math.floor((Date.parse(`${goal.targetDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000) + 1 : null;
+  useEffect(() => {
+    let timer: number;
+    const refreshDay = () => {
+      setToday(localDate());
+      window.clearTimeout(timer);
+      const midnight = new Date();
+      midnight.setHours(24, 0, 0, 0);
+      timer = window.setTimeout(refreshDay, midnight.getTime() - Date.now() + 50);
+    };
+    refreshDay();
+    window.addEventListener('focus', refreshDay);
+    document.addEventListener('visibilitychange', refreshDay);
+    return () => { window.clearTimeout(timer); window.removeEventListener('focus', refreshDay); document.removeEventListener('visibilitychange', refreshDay); };
+  }, []);
   useEffect(() => {
     if (panel === 'settings') document.getElementById('phone-savings-settings')?.scrollIntoView({ block: 'start' });
   }, [panel]);
