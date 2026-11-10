@@ -13,12 +13,13 @@ export function createPhoneTatumHandler({ env = process.env, adapterFactory = cr
     if (!validCode(env.COINJAR_PHONE_ACCESS_CODE) || !env.COINJAR_PHONE_ORIGIN || !env.TATUM_API_KEY) return send(503, { error: 'Wallet balance is not configured.' });
     const code = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined;
     const personal = req.headers['x-coinjar-memory-user'] === '1';
+    const isTestnet = req.url?.split('?')[0] === '/api/phone/testnet';
     if (req.headers.origin !== env.COINJAR_PHONE_ORIGIN || !validCode(code) || (!personal && !timingSafeEqual(Buffer.from(code), Buffer.from(env.COINJAR_PHONE_ACCESS_CODE)))) return send(401, { error: 'Access denied.' });
     try {
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 1024) return send(413, { error: 'Request too large.' }); }
       const input = JSON.parse(body);
-      const testnet = req.url?.split('?')[0] === '/api/phone/testnet';
+      const testnet = isTestnet;
       const transactionLookup = input && Object.keys(input).sort().join(',') === 'address,digest';
       if (testnet && (!personal || !input || typeof input.action !== 'string')) return send(401, { error: 'Enable personal memory before using testnet.' });
       if (!testnet && (!input || (!transactionLookup && Object.keys(input).join(',') !== 'address') || typeof input.address !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(input.address))) return send(400, { error: 'Enter a valid Sui address.' });
@@ -58,7 +59,7 @@ export function createPhoneTatumHandler({ env = process.env, adapterFactory = cr
       return send(200, { balanceMist: result.balanceMist, network: 'mainnet', checkedAt: new Date().toISOString() });
     } catch (error) {
       if (error instanceof SyntaxError) return send(400, { error: 'Invalid request.' });
-      return send(502, { error: 'Wallet balance is unavailable. Try again.' });
+      return send(502, { error: isTestnet ? 'Wallet transfer is unavailable or changed. Check your wallet before retrying.' : 'Wallet balance is unavailable. Try again.' });
     }
   };
 }
