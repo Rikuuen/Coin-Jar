@@ -34,3 +34,16 @@ test('encrypted recovery preserves multiple goals and their savings', async () =
   assert.equal(savings(restored, '2026-01-09').summary.availableCents, 850000);
   assert.throws(() => validateJournal({ ...restored, entries: [...restored.entries, { id: 'bad', kind: 'contribution', goalId: 'missing', amountCents: 1, date: '2026-01-09', note: '', createdAt: '' }] }));
 });
+
+test('encrypted recovery preserves corrected entries without double counting', async () => {
+  const legacy = newJournal('PHP', 100000, '2026-01-01');
+  legacy.goal = { id: 'g', title: 'Goal', targetCents: 50000, targetDate: '2026-01-20', status: 'active', createdAt: '' };
+  legacy.entries.push({ id: 'a', kind: 'contribution', amountCents: 10000, date: '2026-01-09', note: '', createdAt: '' });
+  const upgraded = upgradeGoals(legacy);
+  const journal = { ...upgraded, version: 3 as const, entries: [{ ...upgraded.entries[0], voidedAt: '2026-01-10T00:00:00Z' }, { id: 'b', kind: 'contribution' as const, goalId: 'g', correctionOf: 'a', amountCents: 7000, date: '2026-01-09', note: '', createdAt: '2026-01-10T00:00:00Z' }] };
+  const code = randomBytes(32).toString('base64url'); const { envelope } = await encryptJournal(code, journal); const restored = await decryptJournal(code, envelope);
+  assert.equal(restored.entries.length, 2);
+  assert.equal(savings(restored, '2026-01-10').summary.savedCents, 7000);
+  assert.equal(savings(restored, '2026-01-10').summary.availableCents, 93000);
+  assert.throws(() => validateJournal({ ...restored, entries: [...restored.entries, { ...restored.entries[1], id: 'duplicate' }] }));
+});

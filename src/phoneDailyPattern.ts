@@ -8,7 +8,7 @@ export function dailyEvidence(journal: PhoneJournal, today: string, weekday: num
   const end = Date.parse(`${today}T00:00:00Z`), totals = new Map<string, bigint>();
   for (const entry of journal.entries) {
     const when = Date.parse(`${entry.date}T00:00:00Z`);
-    if (entry.kind !== 'expense' || when > end || when < end - 55 * DAY) continue;
+    if (entry.voidedAt || entry.kind !== 'expense' || when > end || when < end - 55 * DAY) continue;
     totals.set(entry.date, (totals.get(entry.date) ?? 0n) + BigInt(entry.amountCents));
   }
   const selected = [...totals].filter(([date]) => new Date(`${date}T00:00:00Z`).getUTCDay() === weekday);

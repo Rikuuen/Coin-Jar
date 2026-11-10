@@ -41,6 +41,30 @@ test('activity groups entries and calculates the last seven days', async ({ page
   await expect(page.locator('.phone-entry').filter({ hasText: 'Pay' })).toContainText('Recorded time unavailable');
 });
 
+test('correcting a saving preserves history and recalculates the goal and balance', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-10T12:00:00Z'));
+  await page.addInitScript(() => { if (!localStorage.getItem('coinjar.phone.demo.journal.v1')) localStorage.setItem('coinjar.phone.demo.journal.v1', JSON.stringify({ version: 1, currency: 'PHP', openingCents: 1000000, openingDate: '2026-01-01', bufferCents: 0, dailyLimitCents: 0, entries: [{ id: 'original', kind: 'contribution', amountCents: 120000, date: '2026-01-10', note: '', createdAt: '' }], adjustments: [], goal: { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-01-20', status: 'active', createdAt: '' } })); });
+  await page.goto('/'); await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await page.getByRole('button', { name: 'Correct', exact: true }).click();
+  await page.getByLabel('Amount in PHP').fill('1000'); await page.getByLabel('Date', { exact: true }).fill('2026-01-09'); await page.getByRole('button', { name: 'Save correction' }).click();
+  await expect(page.getByText('Corrected · excluded from totals')).toBeVisible();
+  await expect(page.getByText('Corrected entry', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await expect(page.locator('.simple-amount')).toHaveText('₱9,000.00');
+  await expect(page.locator('.phone-goal')).toContainText('₱1,000.00 saved of ₱5,000.00');
+  await expect(page.locator('.phone-today-value')).toContainText('Save ');
+  await page.reload(); await expect(page.locator('.simple-amount')).toHaveText('₱9,000.00');
+});
+
+test('a saving corrected before the first goal stays with that goal', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-01-10T12:00:00Z'));
+  await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('200'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Activity', exact: true }).click(); await page.getByRole('button', { name: 'Correct', exact: true }).click(); await page.getByLabel('Amount in PHP').fill('100'); await page.getByRole('button', { name: 'Save correction' }).click();
+  await page.getByRole('button', { name: 'Goals', exact: true }).click(); await page.getByRole('button', { name: 'Create goal', exact: true }).click(); await page.getByLabel('Goal name').fill('First'); await page.getByLabel('Goal target in PHP').fill('500'); await page.getByLabel('Target date', { exact: true }).fill('2026-01-20'); await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.phone-goal-item')).toContainText('₱100.00 saved of ₱500.00');
+});
+
 test('plain link opens the longer-link journal without exposing or deleting the other journal', async ({ browser }) => {
   const context = await browser.newContext();
   await context.addInitScript(() => {
@@ -128,11 +152,11 @@ test('automatic encrypted recovery follows journal changes and pauses on another
   await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
   await page.evaluate(() => localStorage.removeItem('coinjar.phone.recovery.key.v1.demo.automatic'));
   await page.reload(); await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
-  await page.getByRole('button', { name: 'Home' }).click(); await page.getByRole('button', { name: 'Add expense' }).click();
+  await page.getByRole('button', { name: 'Home' }).click(); await expect(page.getByRole('button', { name: 'Journal backed up' })).toBeVisible(); await page.getByRole('button', { name: 'Add expense' }).click();
   await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Private fictional lunch'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => writes).toBe(2); expect(JSON.stringify(envelope)).not.toContain('Private fictional lunch');
   await first.setOffline(true); await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('10'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(2);
+  await expect(page.getByRole('button', { name: 'Backup needs attention' })).toBeVisible(); await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(2);
   await first.setOffline(false); await expect.poll(() => writes).toBe(3); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible();
   const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo');
   await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -548,6 +572,20 @@ test('savings day resets at local midnight while the app remains open', async ({
     await page.getByRole('button', { name: 'Home', exact: true }).click();
     await page.reload();
     await expect(page.locator('.phone-today-value')).toContainText('Save ');
+  } finally { await context.close(); }
+});
+
+test('optional 8 PM reminder appears only in the open app and can be dismissed', async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: 'http://127.0.0.1:' + (process.env.PORT ?? '4371'), timezoneId: 'Asia/Manila' });
+  try {
+    const page = await context.newPage(); await page.clock.install({ time: new Date('2026-11-10T11:59:59Z') });
+    await page.goto('/'); await page.getByLabel('Nickname').fill('Ari'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('100'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.getByRole('button', { name: 'Profile', exact: true }).click(); await page.getByLabel('Remind me at 8 PM').check();
+    await expect(page.getByText('No notification is sent when the app is closed.', { exact: false })).toBeVisible();
+    await expect(page.getByText('It’s time to review today’s savings.')).toHaveCount(0);
+    await page.clock.runFor(2000); await expect(page.getByText('It’s time to review today’s savings.')).toBeVisible();
+    await page.getByRole('button', { name: 'Got it' }).click(); await page.reload();
+    await expect(page.getByText('It’s time to review today’s savings.')).toHaveCount(0);
   } finally { await context.close(); }
 });
 
