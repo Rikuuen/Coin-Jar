@@ -218,4 +218,3 @@
   .phone-ring .value, .phone-progress span, .phone-app .simple-button,
   .phone-setup-progress span, .phone-step, .phone-step-badge { transition: none; }
 }
-.phone-backup-indicator { display: block; margin: 0 0 12px auto; padding: 6px 4px; border: 0; color: var(--ink-2); background: transparent; font: 600 12px 'DM Sans', sans-serif; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }

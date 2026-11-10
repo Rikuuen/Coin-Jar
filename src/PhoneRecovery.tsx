@@ -9,14 +9,13 @@ const AUTO = KEY + '.automatic';
 const validKey = (code: string) => /^[A-Za-z0-9_-]{43}$/.test(code);
 export function hasRecoveryKey() { try { return validKey(localStorage.getItem(KEY) ?? ''); } catch { return false; } }
 
-export default function PhoneRecovery({ journal, apply, memoryCode, onStatusChange }: { journal: PhoneJournal; apply: (value: PhoneJournal) => boolean; memoryCode: string; onStatusChange?: (status: string) => void }) {
+export default function PhoneRecovery({ journal, apply, memoryCode }: { journal: PhoneJournal; apply: (value: PhoneJournal) => boolean; memoryCode: string }) {
   const [code, setCode] = useState(() => localStorage.getItem(KEY) ?? '');
   const [automatic, setAutomatic] = useState(() => hasRecoveryKey() && localStorage.getItem(KEY) !== memoryCode);
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const autoBackup = usePhoneAutoBackup(journal, code, automatic);
-  useEffect(() => { onStatusChange?.(automatic ? (autoBackup.status || 'Checking backup…') : 'Backup not set up'); }, [automatic, autoBackup.status, onStatusChange]);
   useEffect(() => {
     if (automatic) localStorage.setItem(AUTO, '1');
   }, [automatic]);

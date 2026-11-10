@@ -141,11 +141,11 @@ test('automatic encrypted recovery follows journal changes and pauses on another
   await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
   await page.evaluate(() => localStorage.removeItem('coinjar.phone.recovery.key.v1.demo.automatic'));
   await page.reload(); await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible(); expect(writes).toBe(1);
-  await page.getByRole('button', { name: 'Home' }).click(); await expect(page.getByRole('button', { name: 'Journal backed up' })).toBeVisible(); await page.getByRole('button', { name: 'Add expense' }).click();
+  await page.getByRole('button', { name: 'Home' }).click(); await expect(page.getByRole('button', { name: 'Journal backed up' })).toHaveCount(0); await page.getByRole('button', { name: 'Add expense' }).click();
   await page.getByLabel('Amount in PHP').fill('50'); await page.getByLabel('Note (optional)').fill('Private fictional lunch'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => writes).toBe(2); expect(JSON.stringify(envelope)).not.toContain('Private fictional lunch');
   await first.setOffline(true); await page.getByRole('button', { name: 'Add expense' }).click(); await page.getByLabel('Amount in PHP').fill('10'); await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Backup needs attention' })).toBeVisible(); await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(2);
+  await page.getByRole('button', { name: 'Profile' }).click(); await expect(page.getByText('Backup not confirmed.', { exact: false })).toBeVisible(); expect(writes).toBe(2);
   await first.setOffline(false); await expect.poll(() => writes).toBe(3); await expect(page.getByText('Journal backed up to Walrus.')).toBeVisible();
   const other = await second.newPage(); await other.goto('/?walrus=mainnet-demo');
   await other.getByLabel('Nickname').fill('Other'); await other.getByLabel('Currency').selectOption('PHP'); await other.getByLabel('Current balance').fill('10'); await other.getByRole('button', { name: 'Continue', exact: true }).click();
