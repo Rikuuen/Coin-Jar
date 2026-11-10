@@ -24,12 +24,11 @@
 
 /* Header */
 .phone-app .simple-header { max-width: 520px; padding: 20px 20px 8px; border: 0; }
-.phone-app .simple-brand { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font: 400 27px 'Fraunces', Georgia, serif; letter-spacing: -.04em; }
-.phone-app .simple-brand img { display: block; width: 36px; height: 36px; }
-.phone-app .simple-brand .phone-wordmark { color: var(--ink); }
-.phone-app .simple-brand .phone-wordmark span { color: var(--green); }
-.phone-hello { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 14px; font-weight: 600; }
-.phone-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--card); color: var(--ink); font-size: 14px; font-weight: 700; text-transform: uppercase; }
+.phone-app .simple-brand { display: inline-flex; align-items: center; flex: none; }
+.phone-app .simple-brand img { display: block; width: 148px; height: auto; }
+.phone-hello { display: flex; align-items: center; min-width: 0; margin-left: 12px; gap: 8px; color: var(--ink-2); font-size: 14px; font-weight: 600; }
+.phone-hello > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-avatar { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--card); color: var(--ink); font-size: 14px; font-weight: 700; text-transform: uppercase; }
 
 /* Layout */
 .phone-app .simple-main { max-width: 520px; padding: 8px 20px 120px; }
