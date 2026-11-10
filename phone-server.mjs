@@ -5,7 +5,7 @@ import { createPhoneWalrusHandler } from './phone-walrus.mjs';
 import { createPhoneTatumHandler } from './phone-tatum.mjs';
 
 const root = resolve('dist');
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.woff': 'font/woff' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff' };
 const walrus = createPhoneWalrusHandler();
 const walrusMainnet = createPhoneWalrusHandler({ network: 'mainnet' });
 const tatum = createPhoneTatumHandler();
