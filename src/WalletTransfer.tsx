@@ -5,7 +5,7 @@ import { type AppState, type OnchainTransfer } from './domain';
 import { estimateGas, formatSui } from './sui';
 import { makeUsdcTransfer, parseUsdc, formatUsdc } from './usdc';
 
-type Props = { state: AppState; network: 'mainnet' | 'testnet'; busy: boolean; post: (path: string, body: unknown) => Promise<any>; onError: (message: string) => void };
+type Props = { state: AppState; network: 'mainnet' | 'testnet'; suggestedUsdc?: string; quoteTimestamp?: number; busy: boolean; post: (path: string, body: unknown) => Promise<any>; onError: (message: string) => void };
 
 export default function WalletTransfer(props: Props) {
   const kit = useMemo(() => createDAppKit({
@@ -17,7 +17,7 @@ export default function WalletTransfer(props: Props) {
   return <DAppKitProvider dAppKit={kit}><TransferForm {...props} /></DAppKitProvider>;
 }
 
-function TransferForm({ state, network, busy, post, onError }: Props) {
+function TransferForm({ state, network, suggestedUsdc, quoteTimestamp, busy, post, onError }: Props) {
   const kit = useDAppKit();
   const wallets = useWallets();
   const account = useCurrentAccount();
@@ -62,6 +62,8 @@ function TransferForm({ state, network, busy, post, onError }: Props) {
         onError('The connected account changed before approval. Review the transfer again.');
         return;
       }
+      const marked = await post('/api/onchain/unknown', { id: intentId });
+      if (!marked) throw new Error('Could not persist the pending transfer.');
       const result = await kit.signAndExecuteTransaction({ transaction: makeUsdcTransfer(preview.sender, preview.recipient, preview.amount, intentId, network, preview.budget) });
       const tx = result.Transaction ?? result.FailedTransaction;
       if (!tx?.digest) throw new Error('The wallet did not return a transaction digest.');
@@ -85,6 +87,7 @@ function TransferForm({ state, network, busy, post, onError }: Props) {
       <button className="text-button" disabled={busy || working} onClick={() => { if (window.confirm('Have you checked your wallet? Dismissing this record does not cancel or reverse a transaction.')) void post('/api/onchain/dismiss', { id: active.id, acknowledged: true }); }}>Dismiss after checking wallet</button>
     </div> : <>
       <label>Amount in {network === 'testnet' ? 'test DUSDC' : 'USDC'}<input value={amount} disabled={busy || working} onChange={(event) => { setAmount(event.target.value); setPreview(undefined); }} inputMode="decimal" placeholder="0.00" /></label>
+      {suggestedUsdc && <button className="button outline" disabled={busy || working} onClick={() => { if (!quoteTimestamp || quoteTimestamp > Date.now() || Date.now() - quoteTimestamp > 86400000) { onError('The exchange-rate estimate is out of date. Refresh before using it.'); return; } setAmount(suggestedUsdc); setPreview(undefined); }}>Use suggested amount: {suggestedUsdc} {network === 'testnet' ? 'test DUSDC' : 'USDC'}</button>}
       {!preview && <button className="button outline" disabled={!account || !recipient || busy || working} onClick={() => void previewTransfer()}>Review amount and estimated network fee</button>}
       {preview && <div className="transfer-review"><p>Send <strong>{formatUsdc(preview.amount)} {network === 'testnet' ? 'test DUSDC' : 'USDC'}</strong> on Sui {network} to <strong>{preview.recipient}</strong>.</p><p>Estimated network fee: {formatSui(preview.gas)} SUI. Maximum gas budget: {formatSui(preview.budget)} SUI. Check the wallet’s confirmation before approving; the estimate expires after one minute.</p><p>After verification, a USD/PHP reference may be used to estimate goal progress assuming 1 USDC = $1. Never manually record the same transfer as well.</p><button className="button primary" disabled={busy || working} onClick={() => void submit()}>Approve in wallet</button><button className="text-button" disabled={busy || working} onClick={() => void post('/api/onchain/dismiss', { id: preview.id, acknowledged: true }).then((result) => { if (result) setPreview(undefined); })}>Cancel review</button></div>}
     </>}

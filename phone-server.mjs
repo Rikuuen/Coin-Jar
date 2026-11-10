@@ -13,6 +13,7 @@ const server = createServer(async (req, res) => {
   try {
     if (req.url?.split('?')[0] === '/api/phone/walrus') return await (req.headers['x-coinjar-memory-network'] === 'mainnet' ? walrusMainnet(req, res) : walrus(req, res));
     if (req.url?.split('?')[0] === '/api/phone/wallet-balance') return await tatum(req, res);
+    if (req.url?.split('?')[0] === '/api/phone/testnet') return await tatum(req, res);
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return; }
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = resolve(root, `.${decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname)}`);

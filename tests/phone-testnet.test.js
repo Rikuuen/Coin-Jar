@@ -1,0 +1,31 @@
+import { test } from 'node:test';
+import { strict as assert } from 'node:assert';
+import { bcs } from '@mysten/sui/bcs';
+import { testnetAction } from '../phone-testnet.mjs';
+
+test('testnet intent cannot be resubmitted and verifies only the matching transfer', async () => {
+  const code = 'a'.repeat(43), sender = '0x' + '1'.repeat(64), recipient = '0x' + '2'.repeat(64), digest = 'A'.repeat(44);
+  const env = { BLOB_READ_WRITE_TOKEN: 'fake', TATUM_API_KEY: 'fake' };
+  const memory = new Map();
+  const store = { async read(key) { return { key, value: structuredClone(memory.get(key) ?? { version: 1, transfers: [] }) }; }, async write(s, value) { memory.set(s.key, structuredClone(value)); }, async claim() {} };
+  let transaction;
+  const adapters = { createTatumAdapter: async ({ network }) => { assert.equal(network, 'testnet'); return { getTransaction: async () => transaction }; }, createFxAdapter: () => ({ getRate: async () => ({ value: '0.02', timestamp: Date.now(), source: 'fixture' }) }) };
+  const act = input => testnetAction(code, input, env, store, adapters);
+  await act({ action: 'wallet', address: recipient, goalId: 'goal-one' });
+  await assert.rejects(act({ action: 'intent', sender, recipient, network: 'mainnet', amountMicroUsdc: '1000000' }));
+  await assert.rejects(act({ action: 'intent', sender, recipient: sender, network: 'testnet', amountMicroUsdc: '1000000' }));
+  const created = await act({ action: 'intent', sender, recipient, network: 'testnet', amountMicroUsdc: '1000000' });
+  const id = created.state.onchainTransfers[0].id;
+  await act({ action: 'unknown', id });
+  await assert.rejects(act({ action: 'intent', sender, recipient, network: 'testnet', amountMicroUsdc: '1000000' }));
+  await act({ action: 'digest', id, digest });
+  const coinType = '0xc028557a1ed49e42ed091e115aedefd70a442b184c18fbec5c48d5b6c0b8c184::usdc::USDC';
+  transaction = { network: 'testnet', digest, success: true, checkpoint: '4', sender, inputs: [{ Pure: { bytes: bcs.String.serialize(`coinjar:${id}`).toBase64() } }], balanceChanges: [{ address: sender, coinType, amount: '-1000000' }, { address: recipient, coinType, amount: '999999' }] };
+  await assert.rejects(act({ action: 'verify', id }));
+  transaction.balanceChanges[1].amount = '1000000';
+  const result = await act({ action: 'verify', id });
+  assert.equal(result.state.onchainTransfers[0].status, 'verified');
+  assert.equal(result.state.onchainTransfers[0].phpValuation.centavos, 5000);
+  assert.equal((await testnetAction('b'.repeat(43), { action: 'state' }, env, store, adapters)).state.onchainTransfers.length, 0);
+  await assert.rejects(act({ action: 'verify', id }));
+});

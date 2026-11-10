@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { formatMoney, parseMoney, validateDate } from './domain';
+import { formatMoney, parseMoney, validateDate, type OnchainTransfer } from './domain';
 import { JOURNAL_KEY, goalSaved, newJournal, savings, upgradeGoals, validateJournal, type PhoneJournal } from './phoneJournal';
 import PhoneWalrus from './PhoneWalrus';
 import PhoneRecovery, { hasRecoveryKey } from './PhoneRecovery';
@@ -11,6 +11,7 @@ import { dailyHabitMemory, nextDay, parseDailyHabitMemory, parseSpikeMemory, spi
 import './simple.css';
 import './phone.css';
 
+const PhoneTestnetTransfer = React.lazy(() => import('./PhoneTestnetTransfer'));
 type Panel = 'income' | 'expense' | 'contribution' | 'goal' | 'goal-new' | 'balance' | 'settings' | null;
 function localDate() { return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
 function load() {
@@ -31,6 +32,12 @@ export default function PhoneApp() {
   const [reminderVisible, setReminderVisible] = useState(false);
   const [tab, setTab] = useState<'home' | 'goals' | 'activity' | 'profile'>('home');
   const explanation = useRef<HTMLDialogElement>(null);
+  const savingsChoice = useRef<HTMLDialogElement>(null);
+  const walletTransferSection = useRef<HTMLDivElement>(null);
+  const [pendingSaving, setPendingSaving] = useState<{ amountCents: number; date: string; note: string } | null>(null);
+  const [walletAmount, setWalletAmount] = useState(0);
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [walletActivity, setWalletActivity] = useState<OnchainTransfer[]>([]);
   const [memoryToolsOpen, setMemoryToolsOpen] = useState(false);
   const autoMemory = usePhoneAutoMemory(journal);
   const [onboardAuto, setOnboardAuto] = useState(false);
@@ -78,6 +85,8 @@ export default function PhoneApp() {
   useEffect(() => {
     if (panel === 'settings') document.getElementById('phone-savings-settings')?.scrollIntoView({ block: 'start' });
   }, [panel]);
+  useEffect(() => { if (pendingSaving && !savingsChoice.current?.open) savingsChoice.current?.showModal(); }, [pendingSaving]);
+  useEffect(() => { if (walletOpen && tab === 'home') walletTransferSection.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, [walletOpen, tab]);
 
   useEffect(() => {
     if (!reminders) { setReminderVisible(false); return; }
@@ -114,6 +123,13 @@ export default function PhoneApp() {
     let goal = journal.goal;
     if (goal) { const { wallet: _wallet, ...existing } = goal; goal = { ...existing, ...(address ? { wallet: { address } } : {}) }; }
     return save({ ...rest, goal, ...(address ? { walletAddress: address } : {}) });
+  }
+
+  function recordTestnetTransfer(transfer: OnchainTransfer) {
+    if (!journal || journal.currency !== 'PHP' || !transfer.digest || !transfer.phpValuation || !transfer.goalId || journal.entries.some(entry => entry.testnetDigest === transfer.digest)) return;
+    if (![journal.goal, ...(journal.otherGoals ?? [])].some(item => item?.id === transfer.goalId)) return;
+    const next = upgradeGoals(journal);
+    save({ ...next, version: 4, entries: [...next.entries, { id: `testnet:${transfer.digest}`, kind: 'contribution', amountCents: transfer.phpValuation.centavos, date: today, note: 'Wallet saving', createdAt: new Date().toISOString(), goalId: transfer.goalId, testnetDigest: transfer.digest }] });
   }
 
   function exportBackup() {
@@ -196,8 +212,8 @@ export default function PhoneApp() {
         const amountCents = parseMoney(String(f.get('amount') ?? '')), date = String(f.get('date') ?? ''), note = String(f.get('note') ?? '').trim();
         if (!amountCents) throw new Error('Enter an amount above zero.');
         if (date < journal.openingDate || date > today) throw new Error('Choose a date from your opening balance through today.');
-        if (panel === 'contribution' && amountCents > Math.max(0, summary.summary.availableCents)) throw new Error('Recorded savings cannot exceed your available balance.');
-        next.entries = [...journal.entries, { id: crypto.randomUUID(), kind: panel, amountCents, date, note, createdAt: now, ...(panel === 'contribution' && journal.version >= 2 && journal.goal ? { goalId: journal.goal.id } : {}) }];
+        if (panel === 'contribution') { setPendingSaving({ amountCents, date, note }); setPanel(null); return; }
+        next.entries = [...journal.entries, { id: crypto.randomUUID(), kind: panel, amountCents, date, note, createdAt: now }];
       }
       if (save(next)) {
         if (panel === 'settings') {
@@ -206,6 +222,13 @@ export default function PhoneApp() {
         setNotice('');
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'Check the details and try again.'); }
+  }
+
+  function saveManual() {
+    if (!journal || !summary || !pendingSaving) return;
+    if (pendingSaving.amountCents > Math.max(0, summary.summary.availableCents)) { setError('Recorded savings cannot exceed your available balance.'); return; }
+    const { amountCents, date, note } = pendingSaving;
+    if (save({ ...journal, entries: [...journal.entries, { id: crypto.randomUUID(), kind: 'contribution', amountCents, date, note, createdAt: new Date().toISOString(), ...(journal.version >= 2 && journal.goal ? { goalId: journal.goal.id } : {}) }] })) { setPendingSaving(null); savingsChoice.current?.close(); }
   }
 
   const backup = <section hidden data-testid="backup-controls" className="simple-section"><h2>Backup and restore</h2><p className="simple-hint">Your journal stays in this browser on this device. Clearing browser data or losing your phone can erase it. Download a backup after making changes and keep it somewhere safe.</p><p className="simple-hint">Anyone who can open this browser can see your journal. Backup files are not encrypted, so anyone with a copy can read them.</p>{journal && <button className="simple-button outline" onClick={exportBackup}>Download backup</button>}<label className="simple-file-label">Restore backup<input type="file" accept=".json,application/json" onChange={event => void restore(event)} /></label></section>;
@@ -229,6 +252,7 @@ export default function PhoneApp() {
         <div className="phone-setup-submit"><button className="simple-button primary">Continue</button></div>
       </form></section>{backup}</> : <>
       <nav className="phone-nav" aria-label="Main navigation">{(['home', 'goals', 'activity', 'profile'] as const).map(item => <button key={item} type="button" aria-current={tab === item ? 'page' : undefined} onClick={() => { setTab(item); setPanel(null); setError(''); }}><NavIcon name={item} />{item === 'home' ? 'Home' : item === 'goals' ? 'Goals' : item === 'activity' ? 'Activity' : 'Profile'}</button>)}</nav>
+      <dialog ref={savingsChoice} onCancel={() => setPendingSaving(null)}><h2>How did you save?</h2><p>Choose how to record this saving.</p>{error && <p role="alert">{error}</p>}<button className="simple-button primary" onClick={saveManual}>Record manually</button><button className="simple-button outline" disabled={!goal || journal.currency !== 'PHP'} onClick={() => { if (!pendingSaving) return; setWalletAmount(pendingSaving.amountCents); setWalletOpen(true); setPendingSaving(null); savingsChoice.current?.close(); setTab('home'); }}>Save with Slush</button><button className="simple-link" onClick={() => { setPendingSaving(null); savingsChoice.current?.close(); }}>Cancel</button></dialog>
       {reminderVisible && <section className="simple-section phone-banner" role="status"><p>It’s time to review today’s savings.</p><button type="button" className="simple-button outline" onClick={() => { try { localStorage.setItem('coinjar.phone.reminder.dismissed.v1', today); } catch {} setReminderVisible(false); setTab('home'); }}>Got it</button></section>}
       {tab === 'home' && <>
         {!hasRecoveryKey() && <section className="simple-section phone-banner"><p>Set up a recovery key to automatically back up your journal.</p><button className="simple-button outline" onClick={() => setTab('profile')}>Set up recovery</button></section>}
@@ -244,9 +268,10 @@ export default function PhoneApp() {
         <section className="simple-section phone-card phone-goal"><div className="simple-label-row"><h2>Savings goal</h2>{goal && <button className="simple-link" onClick={() => setPanel('goal')}>Edit goal</button>}</div>{goal ? <><p className="simple-jar-amount">{goal.title}</p><div className="phone-progress" role="progressbar" aria-label="Goal progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><span style={{ width: `${progress * 100}%` }} /></div><p className="simple-hint">{money(summary!.summary.savedCents)} saved of {money(goal.targetCents)} · {Math.round(summary!.summary.progress * 100)}%</p>{daysLeft !== null && <p className={`phone-goal-meta${daysLeft < 1 ? ' late' : ''}`}>{daysLeft > 1 ? `${daysLeft} days left` : daysLeft === 1 ? 'Last day' : 'Target date passed'}</p>}{summary!.summary.remainingCents > 0 && daysLeft !== null && daysLeft > 0 && <p className="simple-hint">{savedToday > 0 && daysLeft === 1 ? 'Your target date is today and the goal is not yet complete.' : savedToday > 0 ? `Tomorrow’s goal pace: ${money(tomorrow!.recommendation.baselineCents)} per day.` : `Goal pace: ${money(summary!.recommendation.baselineCents)} per day.`}{!(savedToday > 0 && daysLeft === 1) && (savedToday > 0 ? tomorrow!.recommendation.amountCents < tomorrow!.recommendation.baselineCents : summary!.recommendation.amountCents < summary!.recommendation.baselineCents) && ' Your suggested amount is below this pace based on your recorded balance and spending.'}</p>}</> : <><p className="simple-empty">Create your first savings goal.</p><div className="simple-actions goal-actions"><button className="simple-button primary" onClick={() => setPanel('goal')}>Create goal</button></div></>}</section>
         {panel === 'goal' && panelForm}
         {goal && <PhoneWallet mode="goal" code={autoMemory.config.code} personal={autoMemory.config.enabled && autoMemory.config.personal} address={walletAddress} goalId={goal.id} openProfile={() => setTab('profile')} />}
+        {goal && journal.currency === 'PHP' && <div ref={walletTransferSection}><React.Suspense fallback={null}><PhoneTestnetTransfer address={walletAddress} goalId={goal.id} code={autoMemory.config.code} personal={autoMemory.config.enabled && autoMemory.config.personal} suggestionCents={walletAmount || summary?.recommendation.amountCents || 0} open={walletOpen} recordedDigests={journal.entries.flatMap(entry => entry.testnetDigest ? [entry.testnetDigest] : [])} onVerified={recordTestnetTransfer} onState={setWalletActivity} /></React.Suspense></div>}
       </>}
       {tab === 'goals' && <><section className="simple-section phone-goals"><h1>Goals</h1>{goal ? <div className="phone-goal-list">{[goal, ...(journal.otherGoals ?? [])].map(item => { const saved = goalSaved(journal, item.id, today); const percent = item.targetCents ? Math.min(100, Math.round(saved / item.targetCents * 100)) : 0; return <div className="phone-goal-item" key={item.id}><div className="simple-label-row"><h2>{item.title}</h2>{item.id === goal.id && <span className="phone-chip on">Active</span>}</div><p className="simple-hint">{money(saved)} saved of {money(item.targetCents)} · {percent}%</p><div className="phone-progress" role="progressbar" aria-label={`${item.title} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div>{item.targetDate && <p className="simple-hint">Target: {item.targetDate}</p>}{item.id !== goal.id && <button type="button" className="simple-button outline" onClick={() => { const next = upgradeGoals(journal); save({ ...next, goal: item, otherGoals: [next.goal!, ...next.otherGoals!.filter(g => g.id !== item.id)] }); }}>Save for this goal</button>}</div>; })}</div> : <p className="simple-empty">Create your first savings goal.</p>}<button type="button" className="simple-button primary phone-create-goal" onClick={() => setPanel('goal-new')}>Create goal</button></section>{panel === 'goal-new' && panelForm}</>}
-      {tab === 'activity' && <ActivityList journal={journal} today={today} money={money} />}
+      {tab === 'activity' && <>{walletActivity.some(item => ['awaiting_wallet', 'unknown', 'pending'].includes(item.status)) && <section className="simple-section"><h2>Wallet savings in progress</h2>{walletActivity.filter(item => ['awaiting_wallet', 'unknown', 'pending'].includes(item.status)).map(item => <p key={item.id}> {item.status === 'pending' ? 'Checking transaction' : item.status === 'unknown' ? 'Check your wallet before retrying' : 'Waiting for wallet approval'} </p>)}<button className="simple-button outline" onClick={() => { setTab('home'); setWalletOpen(true); }}>View wallet saving</button></section>}<ActivityList journal={journal} today={today} money={money} /></>}
       {tab === 'profile' && <><section className="simple-section phone-profile"><span className="phone-avatar large" aria-hidden="true">{(journal.nickname || 'C').slice(0, 1)}</span><div><h1>{journal.nickname || 'Your profile'}</h1><p className="simple-hint">Saving in {journal.currency} · since {journal.openingDate}</p></div></section><section className="simple-section"><h2>Daily reminder</h2><label className="simple-check"><input type="checkbox" checked={reminders} onChange={event => { try { if (event.target.checked) localStorage.setItem('coinjar.phone.reminder.enabled.v1', '1'); else localStorage.removeItem('coinjar.phone.reminder.enabled.v1'); setReminders(event.target.checked); } catch { setError('Could not save reminder settings on this device.'); } }} /> Remind me at 8 PM</label><p className="simple-hint">Appears in CoinJar while it is open. No notification is sent when the app is closed.</p></section><section className="simple-section profile-settings"><div className="phone-card-head"><h2>Memory settings</h2><span className={`phone-chip${autoMemory.config.enabled ? ' on' : ''}`}>{autoMemory.config.enabled ? 'On' : 'Off'}</span></div><p className="simple-hint">Choose how CoinJar remembers your spending patterns.</p><button className="simple-button outline" onClick={() => { setSettingsAuto(autoMemory.config.enabled); setSettingsHabits(autoMemory.config.habits); setSettingsRecent(autoMemory.config.recentHabits); setSettingsCode(autoMemory.config.code); setSettingsPersonal(autoMemory.config.personal || !autoMemory.config.enabled); setSettingsSaved(autoMemory.config.enabled); setSettingsRestoring(autoMemory.config.restorePending); setPanel('settings'); }}>Savings settings</button>{autoMemory.status && <p className="simple-hint" role="status">{autoMemory.status}</p>}{panel === 'settings' && panelForm}</section></>}<div hidden={tab !== 'profile'}><PhoneRecovery journal={journal} memoryCode={autoMemory.config.code} apply={value => save(value)} /></div>{tab === 'profile' && <><PhoneWallet mode="profile" code={autoMemory.config.code} address={walletAddress} link={linkWallet} /><details className="simple-section" open={memoryToolsOpen || autoMemory.config.restorePending} onToggle={event => setMemoryToolsOpen(event.currentTarget.open)}><summary>Restore preferences</summary><PhoneWalrus journal={journal} apply={value => { const applied = save(value); if (applied && autoMemory.config.restorePending) autoMemory.finishRecovery(); return applied; }} personal={autoMemory.config.personal} savedCode={autoMemory.config.code} /></details></>}{backup}</>}
   </main></div>;
 }

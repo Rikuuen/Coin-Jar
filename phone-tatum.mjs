@@ -2,10 +2,11 @@ import { timingSafeEqual } from 'node:crypto';
 import { createTatumAdapter } from './server/integrations/tatum.js';
 import { createMemoryAdapter } from './server/integrations/walrus.js';
 import { personalNamespace } from './phone-walrus.mjs';
+import { testnetAction } from './phone-testnet.mjs';
 
 const validCode = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
 
-export function createPhoneTatumHandler({ env = process.env, adapterFactory = createTatumAdapter, memoryFactory = createMemoryAdapter } = {}) {
+export function createPhoneTatumHandler({ env = process.env, adapterFactory = createTatumAdapter, memoryFactory = createMemoryAdapter, testnetHandler = testnetAction } = {}) {
   return async (req, res) => {
     const send = (status, value) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value)); };
     if (req.method !== 'POST') return send(405, { error: 'Method not allowed.' });
@@ -17,8 +18,10 @@ export function createPhoneTatumHandler({ env = process.env, adapterFactory = cr
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 1024) return send(413, { error: 'Request too large.' }); }
       const input = JSON.parse(body);
+      const testnet = req.url?.split('?')[0] === '/api/phone/testnet';
       const transactionLookup = input && Object.keys(input).sort().join(',') === 'address,digest';
-      if (!input || (!transactionLookup && Object.keys(input).join(',') !== 'address') || typeof input.address !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(input.address)) return send(400, { error: 'Enter a valid Sui address.' });
+      if (testnet && (!personal || !input || typeof input.action !== 'string')) return send(401, { error: 'Enable personal memory before using testnet.' });
+      if (!testnet && (!input || (!transactionLookup && Object.keys(input).join(',') !== 'address') || typeof input.address !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(input.address))) return send(400, { error: 'Enter a valid Sui address.' });
       if (transactionLookup && (typeof input.digest !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(input.digest))) return send(400, { error: 'Enter a valid transaction digest.' });
       if (personal) {
         const key = env.MEMWAL_MAINNET_PRIVATE_KEY || (env.COINJAR_MAINNET_USE_CURRENT_KEY === '1' ? env.MEMWAL_PRIVATE_KEY : undefined);
@@ -36,6 +39,7 @@ export function createPhoneTatumHandler({ env = process.env, adapterFactory = cr
         }
         if (!verified) return send(401, { error: 'Save your Walrus preferences before checking the wallet balance.' });
       }
+      if (testnet) return send(200, await testnetHandler(code, input, env));
       const adapter = await adapterFactory({ apiKey: env.TATUM_API_KEY, network: 'mainnet' });
       if (transactionLookup) {
         const tx = await adapter.getTransaction(input.digest);

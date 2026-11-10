@@ -1,6 +1,16 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { newJournal, savings, validateJournal } from '../src/phoneJournal';
+import { newJournal, savings, upgradeGoals, validateJournal } from '../src/phoneJournal';
+
+test('testnet contribution survives recovery and does not change cash', () => {
+  const j = upgradeGoals(newJournal('PHP', 100000, '2026-01-01'));
+  j.goal = { id: 'g', title: 'Goal', targetCents: 500000, targetDate: '2026-01-10', status: 'active', createdAt: '' };
+  const digest = 'A'.repeat(44);
+  const restored = validateJournal({ ...j, version: 4, entries: [{ id: `testnet:${digest}`, kind: 'contribution', amountCents: 5000, date: '2026-01-01', note: 'Wallet saving', createdAt: '', goalId: 'g', testnetDigest: digest }] });
+  assert.equal(savings(restored, '2026-01-01').summary.savedCents, 5000);
+  assert.equal(savings(restored, '2026-01-01').summary.availableCents, 100000);
+  assert.throws(() => validateJournal({ ...restored, entries: [...restored.entries, ...restored.entries] }));
+});
 
 test('phone coach recalculates the remaining goal over the remaining days', () => {
   const j = newJournal('PHP', 10000, '2026-01-01');

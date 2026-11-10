@@ -60,6 +60,23 @@ test('wallet lookup is unavailable when the Tatum key is missing', async () => {
   finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test('testnet requests require a verified personal memory namespace', async () => {
+  const origin = 'https://coinjar.example', shared = 's'.repeat(43), personal = 'p'.repeat(43);
+  let calls = 0;
+  const env = { COINJAR_PHONE_ACCESS_CODE: shared, COINJAR_PHONE_ORIGIN: origin, TATUM_API_KEY: 'fake', MEMWAL_MAINNET_PRIVATE_KEY: 'fake', MEMWAL_MAINNET_ACCOUNT_ID: 'fake' };
+  const handler = createPhoneTatumHandler({ env, memoryFactory: async ({ namespace }) => ({ list: async () => ({ memories: namespace === personalNamespace(personal, true) ? [{ namespace_id: namespace, blob_id: 'blob' }] : [], has_more: false }) }), testnetHandler: async (code, input) => { calls++; assert.equal(code, personal); assert.equal(input.action, 'state'); return { state: { onchainTransfers: [] } }; } });
+  const server = createServer(handler); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const send = (code, personalHeader = true, requestOrigin = origin) => fetch(`http://127.0.0.1:${server.address().port}/api/phone/testnet`, { method: 'POST', headers: { origin: requestOrigin, authorization: `Bearer ${code}`, ...(personalHeader ? { 'x-coinjar-memory-user': '1', 'x-coinjar-memory-demo': '1' } : {}) }, body: JSON.stringify({ action: 'state' }) });
+  try {
+    assert.equal((await send(shared, false)).status, 401);
+    assert.equal((await send('q'.repeat(43))).status, 401);
+    assert.equal((await send(personal, true, 'https://evil.example')).status, 401);
+    assert.equal(calls, 0);
+    assert.equal((await send(personal)).status, 200);
+    assert.equal(calls, 1);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
 test('transaction lookup reports only the linked wallet net changes and rejects unconfirmed or invalid provider data', async () => {
   const code = 'a'.repeat(43), origin = 'https://coinjar.example', address = '0x' + '1'.repeat(64), other = '0x' + '2'.repeat(64), digest = 'A'.repeat(44);
   let tx = { network: 'mainnet', digest, success: true, checkpoint: '123', balanceChanges: [{ address, coinType: '0x2::sui::SUI', amount: '1000000000' }, { address, coinType: '0x2::sui::SUI', amount: '-10' }, { address: other, coinType: '0x2::sui::SUI', amount: '-1000000000' }] };
