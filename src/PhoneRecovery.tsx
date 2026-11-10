@@ -8,6 +8,7 @@ const KEY = 'coinjar.phone.recovery.key.v1' + (mainnetDemo ? '.demo' : '');
 const AUTO = KEY + '.automatic';
 const validKey = (code: string) => /^[A-Za-z0-9_-]{43}$/.test(code);
 export function hasRecoveryKey() { try { return validKey(localStorage.getItem(KEY) ?? ''); } catch { return false; } }
+export function savedRecoveryKey() { try { const key = localStorage.getItem(KEY) ?? ''; return validKey(key) ? key : ''; } catch { return ''; } }
 
 export default function PhoneRecovery({ journal, apply, memoryCode }: { journal: PhoneJournal; apply: (value: PhoneJournal) => boolean; memoryCode: string }) {
   const [code, setCode] = useState(() => localStorage.getItem(KEY) ?? '');

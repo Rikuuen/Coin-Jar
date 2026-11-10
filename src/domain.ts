@@ -48,6 +48,8 @@ export interface Schedule {
   autoRecord?: boolean;
 }
 export interface OnchainTransfer {
+  external?: boolean;
+  checking?: boolean;
   id: string;
   goalId: string;
   network: 'mainnet' | 'testnet';

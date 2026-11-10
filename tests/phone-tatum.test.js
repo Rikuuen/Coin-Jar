@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createServer } from 'node:http';
 import { createPhoneTatumHandler } from '../phone-tatum.mjs';
-import { personalNamespace } from '../phone-walrus.mjs';
+import { personalNamespace, recoveryNamespace } from '../phone-walrus.mjs';
+import { TESTNET_COIN } from '../phone-testnet.mjs';
 
 test('wallet accepts a personal code only when its Walrus namespace contains a saved memory', async () => {
   const origin = 'https://coinjar.example', shared = 's'.repeat(43), personal = 'p'.repeat(43), address = '0x' + '1'.repeat(64);
@@ -60,6 +61,28 @@ test('wallet lookup is unavailable when the Tatum key is missing', async () => {
   finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test('testnet wallet balance uses only the configured DUSDC asset and rejects invalid provider data', async () => {
+  const code = 'a'.repeat(43), origin = 'https://coinjar.example', address = '0x' + '1'.repeat(64);
+  let network = 'testnet', coinType = TESTNET_COIN, balance = '1690000', calls = 0;
+  const server = createServer(createPhoneTatumHandler({ env: { COINJAR_PHONE_ACCESS_CODE: code, COINJAR_PHONE_ORIGIN: origin, TATUM_API_KEY: 'secret' }, adapterFactory: async options => {
+    assert.equal(options.network, 'testnet');
+    return { getBalance: async (owner, coin) => { calls++; assert.equal(owner, address); assert.equal(coin, TESTNET_COIN); return { network, coinType, balanceMist: balance }; } };
+  } }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const send = (body, token = code) => fetch(`http://127.0.0.1:${server.address().port}`, { method: 'POST', headers: { origin, authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await send({ address, asset: 'test-dusdc' }, 'b'.repeat(43))).status, 401);
+    assert.equal((await send({ address, asset: 'other' })).status, 400);
+    assert.equal((await send({ address, asset: 'test-dusdc', network: 'mainnet' })).status, 400);
+    assert.equal(calls, 0);
+    const response = await send({ address, asset: 'test-dusdc' });
+    const result = await response.json(); assert.equal(response.status, 200); assert.equal(result.network, 'testnet'); assert.equal(result.asset, 'test-dusdc'); assert.equal(result.balanceBaseUnits, '1690000'); assert.equal(JSON.stringify(result).includes('secret'), false);
+    network = 'mainnet'; assert.equal((await send({ address, asset: 'test-dusdc' })).status, 502); network = 'testnet';
+    coinType = '0x2::sui::SUI'; assert.equal((await send({ address, asset: 'test-dusdc' })).status, 502); coinType = TESTNET_COIN;
+    balance = '-1'; assert.equal((await send({ address, asset: 'test-dusdc' })).status, 502);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
 test('testnet requests require a verified personal memory namespace', async () => {
   const origin = 'https://coinjar.example', shared = 's'.repeat(43), personal = 'p'.repeat(43);
   let calls = 0;
@@ -73,6 +96,23 @@ test('testnet requests require a verified personal memory namespace', async () =
     assert.equal((await send(personal, true, 'https://evil.example')).status, 401);
     assert.equal(calls, 0);
     assert.equal((await send(personal)).status, 200);
+    assert.equal(calls, 1);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('testnet accepts only a recovery token with an existing isolated backup', async () => {
+  const origin = 'https://coinjar.example', token = 'r'.repeat(43), shared = 's'.repeat(43);
+  const env = { COINJAR_PHONE_ACCESS_CODE: shared, COINJAR_PHONE_ORIGIN: origin, TATUM_API_KEY: 'fake', MEMWAL_MAINNET_PRIVATE_KEY: 'fake', MEMWAL_MAINNET_ACCOUNT_ID: 'fake' };
+  let calls = 0;
+  const handler = createPhoneTatumHandler({ env, memoryFactory: async ({ namespace }) => ({ list: async () => ({ memories: namespace === recoveryNamespace(token, true) ? [{ namespace_id: namespace, blob_id: 'backup' }] : [], has_more: false }) }), testnetHandler: async code => { calls++; assert.equal(code, token); return { state: {} }; } });
+  const server = createServer(handler); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const send = (code, demo = true) => fetch(`http://127.0.0.1:${server.address().port}/api/phone/testnet`, { method: 'POST', headers: { origin, authorization: `Bearer ${code}`, 'x-coinjar-recovery': '1', ...(demo ? { 'x-coinjar-memory-demo': '1' } : {}) }, body: JSON.stringify({ action: 'state' }) });
+  try {
+    assert.equal((await send(shared)).status, 401);
+    assert.equal((await send('q'.repeat(43))).status, 401);
+    assert.equal((await send(token, false)).status, 401);
+    assert.equal(calls, 0);
+    assert.equal((await send(token)).status, 200);
     assert.equal(calls, 1);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });

@@ -8,6 +8,7 @@ const backupPrefix = 'COINJAR_ENCRYPTED_JOURNAL_V1 ';
 const testnet = 'https://relayer.dev.memwal.ai';
 const validCode = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
 export const personalNamespace = (code, demo = false) => `coinjar-user-${createHash('sha256').update(`${demo ? 'coinjar-demo-v1' : 'coinjar-memory-v1'}:${code}`).digest('base64url')}`;
+export const recoveryNamespace = (code, demo = false) => `coinjar-user-${createHash('sha256').update(`${demo ? 'coinjar-recovery-demo-v1' : 'coinjar-recovery-v1'}:${code}`).digest('base64url')}`;
 const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 function safeMemory(value) {
   if (typeof value !== 'string' || value.length > 300) throw Error('Invalid memory');
@@ -54,7 +55,7 @@ export function createPhoneWalrusHandler({ env = process.env, adapterFactory = c
     const personal = mainnet && (recovery || req.headers['x-coinjar-memory-user'] === '1');
     if (req.headers.origin !== env.COINJAR_PHONE_ORIGIN || !validCode(code) || (!personal && !timingSafeEqual(Buffer.from(code), Buffer.from(expected)))) return send(401, { error: 'Access denied.' });
     const personalDemo = personal && req.headers['x-coinjar-memory-demo'] === '1';
-    const namespace = personal ? recovery ? `coinjar-user-${createHash('sha256').update(`${personalDemo ? 'coinjar-recovery-demo-v1' : 'coinjar-recovery-v1'}:${code}`).digest('base64url')}` : personalNamespace(code, personalDemo) : mainnet ? 'coinjar-hackathon-demo' : 'coinjar-phone-testnet';
+    const namespace = personal ? recovery ? recoveryNamespace(code, personalDemo) : personalNamespace(code, personalDemo) : mainnet ? 'coinjar-hackathon-demo' : 'coinjar-phone-testnet';
     let body = '';
     try {
       for await (const chunk of req) { body += chunk; if (body.length > (recovery ? 65536 : 2048)) return send(413, { error: 'Request too large.' }); }

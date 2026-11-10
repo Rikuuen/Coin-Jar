@@ -29,3 +29,48 @@ test('testnet intent cannot be resubmitted and verifies only the matching transf
   assert.equal((await testnetAction('b'.repeat(43), { action: 'state' }, env, store, adapters)).state.onchainTransfers.length, 0);
   await assert.rejects(act({ action: 'verify', id }));
 });
+
+test('manual testnet receipt requires a recent successful matching incoming transaction', async () => {
+  const code = 'a'.repeat(43), recipient = '0x' + '2'.repeat(64), digest = 'A'.repeat(44), coinType = '0xc028557a1ed49e42ed091e115aedefd70a442b184c18fbec5c48d5b6c0b8c184::usdc::USDC';
+  const env = { BLOB_READ_WRITE_TOKEN: 'fake', TATUM_API_KEY: 'fake' }, memory = new Map();
+  let claims = 0, transaction;
+  const store = { async read(key) { return { key, value: structuredClone(memory.get(key) ?? { version: 1, transfers: [] }) }; }, async write(s, value) { memory.set(s.key, structuredClone(value)); }, async claim() { claims++; } };
+  const adapters = { createTatumAdapter: async () => ({ getTransaction: async () => transaction }), createFxAdapter: () => ({ getRate: async () => ({ value: '0.02', timestamp: Date.now(), source: 'fixture' }) }) };
+  const act = input => testnetAction(code, input, env, store, adapters);
+  await act({ action: 'wallet', address: recipient, goalId: 'goal' });
+  const created = await act({ action: 'external-intent', recipient, network: 'testnet', amountMicroUsdc: '1000000' });
+  const transfer = created.state.onchainTransfers[0];
+  assert.equal(transfer.external, true); assert.equal(transfer.status, 'unknown');
+  await assert.rejects(act({ action: 'external-intent', recipient, network: 'testnet', amountMicroUsdc: '1000000' }));
+  await act({ action: 'digest', id: transfer.id, digest });
+  transaction = { network: 'testnet', digest, success: true, checkpoint: '4', timestampMs: Date.parse(transfer.createdAt) - 1, balanceChanges: [{ address: recipient, coinType, amount: '1000000' }] };
+  await assert.rejects(act({ action: 'verify', id: transfer.id }));
+  transaction.timestampMs = Date.parse(transfer.createdAt) + 1;
+  transaction.balanceChanges[0].amount = '999999';
+  await assert.rejects(act({ action: 'verify', id: transfer.id }));
+  transaction.balanceChanges[0].amount = '1000000'; transaction.network = 'mainnet';
+  await assert.rejects(act({ action: 'verify', id: transfer.id }));
+  transaction.network = 'testnet';
+  const result = await act({ action: 'verify', id: transfer.id });
+  assert.equal(result.state.onchainTransfers[0].status, 'verified');
+  assert.equal(claims, 1);
+  await assert.rejects(act({ action: 'verify', id: transfer.id }));
+});
+
+test('automatic receipt discovery waits, rejects ambiguity, and verifies through Tatum once', async () => {
+  const code = 'a'.repeat(43), recipient = '0x' + '2'.repeat(64), digest = 'A'.repeat(44), coinType = '0xc028557a1ed49e42ed091e115aedefd70a442b184c18fbec5c48d5b6c0b8c184::usdc::USDC';
+  const env = { BLOB_READ_WRITE_TOKEN: 'fake', TATUM_API_KEY: 'fake' }, memory = new Map();
+  let matches = [], calls = 0, claims = 0;
+  const store = { async read(key) { return { key, value: structuredClone(memory.get(key) ?? { version: 1, transfers: [] }) }; }, async write(s, value) { memory.set(s.key, structuredClone(value)); }, async claim() { claims++; } };
+  const adapters = { findMatchingReceipts: async () => matches, createTatumAdapter: async () => ({ getTransaction: async () => { calls++; return { network: 'testnet', digest, success: true, checkpoint: '4', timestampMs: Date.now() + 1000, balanceChanges: [{ address: recipient, coinType, amount: '1000000' }] }; } }) };
+  const act = input => testnetAction(code, input, env, store, adapters);
+  await act({ action: 'wallet', address: recipient, goalId: 'goal' });
+  const created = await act({ action: 'external-intent', recipient, network: 'testnet', amountMicroUsdc: '1000000' });
+  const id = created.state.onchainTransfers[0].id;
+  assert.equal((await act({ action: 'detect', id })).check, 'waiting');
+  assert.equal((await act({ action: 'state' })).state.onchainTransfers[0].checking, true);
+  matches = [digest, 'B'.repeat(44)]; assert.equal((await act({ action: 'detect', id })).check, 'ambiguous'); assert.equal(calls, 0);
+  matches = [digest]; const confirmed = await act({ action: 'detect', id });
+  assert.equal(confirmed.check, 'verified'); assert.equal(confirmed.state.onchainTransfers[0].status, 'verified'); assert.equal(calls, 1); assert.equal(claims, 1);
+  await assert.rejects(act({ action: 'detect', id }));
+});

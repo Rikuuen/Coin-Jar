@@ -37,6 +37,13 @@ export async function decryptJournal(code: string, envelope: Envelope) {
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, key, ciphertext);
   return validateJournal(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plaintext)));
 }
+export async function recoveryTransferAuth(code: string) {
+  const { token } = await keys(code);
+  const namespaceKey = 'coinjar.phone.recovery.namespace.v1' + memoryStorageSuffix + await personalStorageSuffix(code);
+  const saved = localStorage.getItem(namespaceKey);
+  const legacy = saved === 'legacy' ? true : saved === 'regular' ? false : mainnetDemo;
+  return { token, headers: { 'x-coinjar-recovery': '1', ...(legacy ? { 'x-coinjar-memory-demo': '1' } : {}) } };
+}
 export async function recoveryRequest(code: string, action: 'backupSave' | 'backupRestore', envelope?: Envelope, operationId: string = crypto.randomUUID()) {
   const { token } = await keys(code);
   const namespaceKey = 'coinjar.phone.recovery.namespace.v1' + memoryStorageSuffix + await personalStorageSuffix(code);

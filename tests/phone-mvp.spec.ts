@@ -3,11 +3,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { encryptJournal } from '../src/journalCipher';
 import { newJournal } from '../src/phoneJournal';
 
-test('recovery prompt fits phone widths and helper text has readable contrast', async ({ page }) => {
+test('home fits phone widths and profile helper text has readable contrast', async ({ page }) => {
   await page.goto('/'); await page.getByLabel('Nickname').fill('Fictional'); await page.getByLabel('Currency').selectOption('PHP'); await page.getByLabel('Current balance').fill('1000'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
   for (const width of [320, 375, 430]) {
     await page.setViewportSize({ width, height: 915 });
-    const size = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: innerWidth, button: document.querySelector('.phone-banner button')!.getBoundingClientRect().right }));
+    const size = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: innerWidth, button: document.querySelector('.phone-save-button')!.getBoundingClientRect().right }));
     expect(size.page).toBeLessThanOrEqual(size.viewport); expect(size.button).toBeLessThanOrEqual(size.viewport);
   }
   await page.getByRole('button', { name: 'Profile', exact: true }).click();
@@ -391,7 +391,7 @@ test('phone journal saves its loop locally and restores only a valid confirmed b
   await page.getByRole('button', { name: 'Add savings' }).click();
   await page.getByLabel('Amount in PHP').fill('10');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('button', { name: 'Record manually' }).click();
+  await page.getByRole('button', { name: 'Record in CoinJar' }).click();
   await expect(page.getByText('₱10.00 saved of ₱500.00 · 2%')).toBeVisible();
   await page.reload();
   await expect(page.locator('.simple-amount')).toHaveText('₱1,040.00');
@@ -484,10 +484,10 @@ test('goal coach recalculates after different daily savings', async ({ page }) =
   await page.getByRole('button', { name: 'Create goal' }).click(); await page.getByLabel('Goal name').fill('Goal'); await page.getByLabel('Goal target in PHP').fill('5000'); await page.getByLabel('Target date', { exact: true }).fill('2026-01-10'); await page.getByRole('button', { name: 'Save', exact: true }).click();
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Daily savings suggestion' }) });
   await expect(section.locator('.phone-today-value')).toHaveText('Save ₱500.00 today!');
-  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record manually' }).click();
+  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record in CoinJar' }).click();
   await expect(section.getByText('Total saved')).toHaveCount(0); await expect(section.locator('.phone-today-value')).toHaveText('You saved ₱300.00 today!'); await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Tomorrow, consider saving around ₱522.23.');
-  await page.clock.setFixedTime(new Date('2026-01-02T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('500'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record manually' }).click();
-  await page.clock.setFixedTime(new Date('2026-01-03T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('200'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record manually' }).click();
+  await page.clock.setFixedTime(new Date('2026-01-02T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('500'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record in CoinJar' }).click();
+  await page.clock.setFixedTime(new Date('2026-01-03T12:00:00Z')); await page.reload(); await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('200'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record in CoinJar' }).click();
   await expect(section.locator('.phone-today-value')).toHaveText('You saved ₱200.00 today!'); await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Tomorrow, consider saving around ₱571.43.');
   await page.reload(); await expect(section.locator('.phone-tomorrow-amount')).toHaveText('Tomorrow, consider saving around ₱571.43.');
   await page.getByRole('button', { name: 'Profile' }).click(); await page.getByRole('button', { name: 'Savings settings' }).click();
@@ -537,7 +537,7 @@ test('multiple goals preserve existing savings and keep contributions separate',
   await expect(page.locator('.phone-goal')).toContainText('Trip');
   await expect(page.locator('.simple-amount')).toHaveText('₱8,800.00');
   await expect(page.locator('.phone-today-value')).toContainText('Save ');
-  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record manually' }).click();
+  await page.getByRole('button', { name: 'Add savings' }).click(); await page.getByLabel('Amount in PHP').fill('300'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Record in CoinJar' }).click();
   await expect(page.locator('.phone-goal')).toContainText('₱300.00 saved of ₱3,000.00');
   await page.reload(); await expect(page.locator('.phone-goal')).toContainText('₱300.00 saved of ₱3,000.00');
   await page.getByRole('button', { name: 'Goals', exact: true }).click();
